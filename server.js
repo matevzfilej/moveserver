@@ -1,64 +1,104 @@
-import express from "express";
-import { createServer } from "http";
-import { Server } from "socket.io";
-import cors from "cors";
+// server.js — MoveServer (Render)
+// --------------------------------
+
+const express = require("express");
+const http = require("http");
+const cors = require("cors");
 
 const app = express();
+const server = http.createServer(app);
+
+// ── Config ─────────────────────────────────────────────────────────────
+const PORT = process.env.PORT || 10000;
+
+// dovoljeni origin-i (CSV v env CORS_ORIGIN) + default za onrender domeno
+const CSV = (process.env.CORS_ORIGIN || "").split(",").map(s => s.trim()).filter(Boolean);
+const ALLOWED_ORIGINS = [
+  "https://moveserver.onrender.com", // self (za varnost)
+  ...CSV
+];
+
+// CORS za Express (HTTP API)
+app.use(cors({
+  origin: function (origin, cb) {
+    // omogoči tudi curl/postman (origin = undefined)
+    if (!origin) return cb(null, true);
+    if (ALLOWED_ORIGINS.includes(origin)) return cb(null, true);
+    return cb(new Error("CORS blocked: " + origin));
+  },
+  methods: ["GET", "POST", "OPTIONS"],
+  credentials: false
+}));
 app.use(express.json());
-const origins = (process.env.CORS_ORIGIN||"").split(",").map(s=>s.trim()).filter(Boolean);
-app.use(cors({ origin:(o,cb)=>cb(null,!o||origins.includes(o)), credentials:true }));
 
-const http = createServer(app);
-const io = new Server(http, { cors:{ origin: origins } });
-
-// in-memory store
-const store = { drops:[], claims:[] };
-const uid = () => Math.random().toString(36).slice(2);
-
-// endpoints
-app.get("/api/drops",(req,res)=>res.json(store.drops.filter(d=>d.is_active!==false)));
-app.post("/api/drops",(req,res)=>{
-  const d={ id:uid(), title:req.body.title||"Untitled", description:req.body.description||"",
-    lat:+req.body.lat, lng:+req.body.lng, radius_m:+(req.body.radius_m||25),
-    reward_type:req.body.reward_type||"points", reward_value:+(req.body.reward_value||10),
-    is_active:req.body.is_active!==false, created_at:new Date().toISOString() };
-  store.drops.push(d); io.emit("drop:create", d); res.json(d);
+// ── Socket.IO z lastnim CORS ───────────────────────────────────────────
+const { Server } = require("socket.io");
+const io = new Server(server, {
+  cors: {
+    origin: ALLOWED_ORIGINS,
+    methods: ["GET", "POST"],
+    credentials: false
+  },
+  transports: ["websocket", "polling"],
+  pingTimeout: 20000,
+  pingInterval: 25000
 });
-app.patch("/api/drops/:id",(req,res)=>{
-  const i=store.drops.findIndex(x=>x.id===req.params.id);
-  if(i<0) return res.status(404).json({error:"not found"});
-  store.drops[i] = { ...store.drops[i], ...req.body };
-  io.emit("drop:update", store.drops[i]); res.json(store.drops[i]);
-});
-const toRad=d=>d*Math.PI/180;
-const distM=(a,b,c,d)=>{const R=6371000,dLat=toRad(c-a),dLng=toRad(d-b);
-  const A=Math.sin(dLat/2)**2+Math.cos(toRad(a))*Math.cos(toRad(c))*Math.sin(dLng/2)**2;
-  return 2*R*Math.asin(Math.sqrt(A));};
-app.post("/api/claims",(req,res)=>{
-  const {dropId,userId,user_lat,user_lng}=req.body||{};
-  const drop=store.drops.find(x=>x.id===dropId && x.is_active!==false);
-  if(!drop) return res.status(400).json({error:"inactive or missing drop"});
-  const distance=distM(+user_lat,+user_lng,drop.lat,drop.lng);
-  if(distance>(drop.radius_m||25)+10) return res.status(400).json({error:"too far",distance});
-  if(store.claims.find(c=>c.dropId===dropId&&c.userId===userId))
-    return res.status(409).json({error:"already claimed"});
-  const c={ id:uid(), dropId, userId:userId||"web-user", user_lat:+user_lat, user_lng:+user_lng,
-            claimed_at:new Date().toISOString() };
-  store.claims.push(c); io.emit("claim:create", c); res.json({ok:true,claim:c});
-});
-app.get("/api/stats/overview",(req,res)=>res.json({drops:store.drops.length,claims:store.claims.length,last_claim:store.claims.at(-1)||null}));
 
-const PORT = process.env.PORT || 3001;
-http.listen(PORT, ()=>console.log("MoveServer on :"+PORT));
+// ── In-memory demo storage (za predstavitev) ───────────────────────────
+let drops = [];   // {id,title,lat,lng,...}
+let claims = [];  // {dropId,user,claimed_at}
 
+// ── Socket handlers ────────────────────────────────────────────────────
 io.on("connection", (socket) => {
-  // ko dashboard ustvari drop preko socket.io
+  console.log("Socket connected:", socket.id);
+
   socket.on("drop:create", (drop) => {
-    io.emit("drop:create", drop);          // pošlji vsem odjemalcem (tudi appu)
+    // dodeli ID, shrani v RAM, broadcast
+    const d = { id: Date.now().toString(36), ...drop };
+    drops.push(d);
+    io.emit("drop:create", d);
   });
 
-  // ko app pošlje claim preko socket.io
   socket.on("claim:create", (claim) => {
-    io.emit("claim:create", claim);        // pošlji vsem (dashboard bo videl v živo)
+    const c = { claimed_at: new Date().toISOString(), ...claim };
+    claims.push(c);
+    io.emit("claim:create", c);
   });
+
+  socket.on("disconnect", () => {
+    console.log("Socket disconnected:", socket.id);
+  });
+});
+
+// ── HTTP API (za varnost / fallback) ───────────────────────────────────
+app.get("/", (_req, res) => res.send("MoveServer OK"));
+
+app.get("/api/health", (_req, res) => {
+  res.json({ ok: true, time: new Date().toISOString() });
+});
+
+app.get("/api/drops", (_req, res) => {
+  res.json(drops);
+});
+
+app.post("/api/drops", (req, res) => {
+  const payload = req.body || {};
+  const d = { id: Date.now().toString(36), ...payload };
+  drops.push(d);
+  io.emit("drop:create", d);  // broadcast tudi iz HTTP
+  res.json(d);
+});
+
+app.post("/api/claims", (req, res) => {
+  const payload = req.body || {};
+  const c = { claimed_at: new Date().toISOString(), ...payload };
+  claims.push(c);
+  io.emit("claim:create", c);
+  res.json(c);
+});
+
+// ── Start ──────────────────────────────────────────────────────────────
+server.listen(PORT, () => {
+  console.log("MoveServer on :", PORT);
+  console.log("Allowed origins:", ALLOWED_ORIGINS);
 });
