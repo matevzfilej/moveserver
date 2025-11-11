@@ -50,3 +50,15 @@ app.get("/api/stats/overview",(req,res)=>res.json({drops:store.drops.length,clai
 
 const PORT = process.env.PORT || 3001;
 http.listen(PORT, ()=>console.log("MoveServer on :"+PORT));
+
+io.on("connection", (socket) => {
+  // ko dashboard ustvari drop preko socket.io
+  socket.on("drop:create", (drop) => {
+    io.emit("drop:create", drop);          // pošlji vsem odjemalcem (tudi appu)
+  });
+
+  // ko app pošlje claim preko socket.io
+  socket.on("claim:create", (claim) => {
+    io.emit("claim:create", claim);        // pošlji vsem (dashboard bo videl v živo)
+  });
+});
