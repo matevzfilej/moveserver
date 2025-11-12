@@ -1,104 +1,50 @@
-// server.js — MoveServer (Render)
-// --------------------------------
-
-const express = require("express");
-const http = require("http");
-const cors = require("cors");
+const express = require('express');
+const cors = require('cors');
+const path = require('path');
+const { createServer } = require('http');
+const { Server } = require('socket.io');
 
 const app = express();
-const server = http.createServer(app);
 
-// ── Config ─────────────────────────────────────────────────────────────
-const PORT = process.env.PORT || 10000;
-
-// dovoljeni origin-i (CSV v env CORS_ORIGIN) + default za onrender domeno
-const CSV = (process.env.CORS_ORIGIN || "").split(",").map(s => s.trim()).filter(Boolean);
-const ALLOWED_ORIGINS = [
-  "https://moveserver.onrender.com", // self (za varnost)
-  ...CSV
-];
-
-// CORS za Express (HTTP API)
+// === CORS ===
+const allowedOrigins = (process.env.CORS_ORIGIN || '').split(',').map(s => s.trim()).filter(Boolean);
 app.use(cors({
-  origin: function (origin, cb) {
-    // omogoči tudi curl/postman (origin = undefined)
-    if (!origin) return cb(null, true);
-    if (ALLOWED_ORIGINS.includes(origin)) return cb(null, true);
-    return cb(new Error("CORS blocked: " + origin));
+  origin: (origin, cb) => {
+    if (!origin || allowedOrigins.length === 0) return cb(null, true);
+    const ok = allowedOrigins.some(o => origin === o);
+    return ok ? cb(null, true) : cb(new Error('CORS blocked'), false);
   },
-  methods: ["GET", "POST", "OPTIONS"],
-  credentials: false
+  methods: ['GET', 'POST'],
+  credentials: true
 }));
+
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
-// ── Socket.IO z lastnim CORS ───────────────────────────────────────────
-const { Server } = require("socket.io");
-const io = new Server(server, {
+// === Routes ===
+const statsRouter = require('./routes/stats');
+const dropsRouter = require('./routes/drops');
+app.use('/stats', statsRouter);
+app.use('/drops', dropsRouter);
+
+// === Static (optional, če uporabljaš lokalni dash) ===
+app.use(express.static(path.join(__dirname, 'public')));
+
+app.get('/health', (_req, res) => res.json({ ok: true }));
+
+// === Socket.io ===
+const httpServer = createServer(app);
+const io = new Server(httpServer, {
   cors: {
-    origin: ALLOWED_ORIGINS,
-    methods: ["GET", "POST"],
-    credentials: false
-  },
-  transports: ["websocket", "polling"],
-  pingTimeout: 20000,
-  pingInterval: 25000
+    origin: allowedOrigins.length ? allowedOrigins : true,
+    methods: ['GET', 'POST']
+  }
 });
 
-// ── In-memory demo storage (za predstavitev) ───────────────────────────
-let drops = [];   // {id,title,lat,lng,...}
-let claims = [];  // {dropId,user,claimed_at}
-
-// ── Socket handlers ────────────────────────────────────────────────────
-io.on("connection", (socket) => {
-  console.log("Socket connected:", socket.id);
-
-  socket.on("drop:create", (drop) => {
-    // dodeli ID, shrani v RAM, broadcast
-    const d = { id: Date.now().toString(36), ...drop };
-    drops.push(d);
-    io.emit("drop:create", d);
-  });
-
-  socket.on("claim:create", (claim) => {
-    const c = { claimed_at: new Date().toISOString(), ...claim };
-    claims.push(c);
-    io.emit("claim:create", c);
-  });
-
-  socket.on("disconnect", () => {
-    console.log("Socket disconnected:", socket.id);
-  });
+io.on('connection', (socket) => {
+  require('./socket/dropHandlers')(io, socket);
+  require('./socket/claimHandlers')(io, socket);
 });
 
-// ── HTTP API (za varnost / fallback) ───────────────────────────────────
-app.get("/", (_req, res) => res.send("MoveServer OK"));
-
-app.get("/api/health", (_req, res) => {
-  res.json({ ok: true, time: new Date().toISOString() });
-});
-
-app.get("/api/drops", (_req, res) => {
-  res.json(drops);
-});
-
-app.post("/api/drops", (req, res) => {
-  const payload = req.body || {};
-  const d = { id: Date.now().toString(36), ...payload };
-  drops.push(d);
-  io.emit("drop:create", d);  // broadcast tudi iz HTTP
-  res.json(d);
-});
-
-app.post("/api/claims", (req, res) => {
-  const payload = req.body || {};
-  const c = { claimed_at: new Date().toISOString(), ...payload };
-  claims.push(c);
-  io.emit("claim:create", c);
-  res.json(c);
-});
-
-// ── Start ──────────────────────────────────────────────────────────────
-server.listen(PORT, () => {
-  console.log("MoveServer on :", PORT);
-  console.log("Allowed origins:", ALLOWED_ORIGINS);
-});
+const PORT = process.env.PORT || 3000;
+httpServer.listen(PORT, () => console.log('MoveServer running on port', PORT));

@@ -1,0 +1,33 @@
+const { pool } = require('../db/pool');
+
+module.exports = function(io, socket) {
+  socket.on('drop:claim', async (payload, ack) => {
+    const { drop_id, user_id, value } = payload;
+    if (!drop_id || !user_id) return ack && ack({ ok: false, error: 'Missing fields' });
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const ins = await client.query(`
+        INSERT INTO claims (drop_id, user_id, value)
+        VALUES ($1,$2,$3)
+        ON CONFLICT (drop_id, user_id) DO NOTHING
+        RETURNING *`, [drop_id, user_id, value || null]);
+      const claim = ins.rows[0];
+      if (claim) {
+        await client.query(`UPDATE drops SET claimed_count = claimed_count + 1 WHERE id=$1`, [drop_id]);
+        await client.query('COMMIT');
+        io.emit('claim:created', claim);
+        ack && ack({ ok: true, claim });
+      } else {
+        await client.query('ROLLBACK');
+        ack && ack({ ok: false, error: 'ALREADY_CLAIMED' });
+      }
+    } catch (e) {
+      await client.query('ROLLBACK');
+      ack && ack({ ok: false, error: e.message });
+    } finally {
+      client.release();
+    }
+  });
+};
