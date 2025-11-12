@@ -1,4 +1,4 @@
-// MoveServer — Express + Socket.IO — REST (/api aliases) + simple DB migrate 1
+// MoveServer — Express + Socket.IO — REST (/api aliases) + simple DB migrate
 const express = require('express');
 const cors = require('cors');
 const { createServer } = require('http');
