@@ -1,10 +1,10 @@
 {
   "name": "moveserver",
   "version": "1.0.0",
-  "description": "RealDropHunt Move server (Express + Socket.IO + Postgres + auth)",
-  "main": "server.js",
+  "description": "RealDropHunt Move backend",
+  "main": "server.cjs",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.cjs"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
