@@ -1,269 +1,596 @@
-// MoveServer (CJS) — Express + Socket.IO — CRUD Drops, varni Claim-i, Statistika, Nagrade
+// MoveServer – PostgreSQL + username/password + drops/claims/statistika
+// CJS (brez "type": "module")
+
 const express = require('express');
 const cors = require('cors');
 const { createServer } = require('http');
 const { Server } = require('socket.io');
+const bcrypt = require('bcryptjs');
 
-const app = express();
-app.use(cors({ origin: true, credentials: true }));
-app.use(express.json());
+const VERSION = 'pg-auth-v1.0-sl';
 
-const VERSION = 'v3.1-sl-pastel-delete-rewards';
-
-// ====== DB ali spomin ======
-let pool = null, useDb = false;
-try {
-  const { Pool } = require('pg');
-  if (process.env.DATABASE_URL) {
-    const needSsl =
-      process.env.PGSSLMODE === 'require' ||
-      (process.env.DATABASE_URL || '').includes('sslmode=require');
-    pool = new Pool({
-      connectionString: process.env.DATABASE_URL,
-      ssl: needSsl ? { rejectUnauthorized: false } : false
-    });
-    useDb = true;
-    console.log('[DB] PostgreSQL je aktiven');
-  } else {
-    console.log('[DB] DATABASE_URL ni nastavljen → način spomin');
-  }
-} catch {
-  console.log('[DB] pg ni na voljo → način spomin');
-}
-
-const mem = { drops: [], claims: [] };
-const uuid = () =>
-  'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
-    const r = (Math.random() * 16) | 0;
-    const v = c === 'x' ? r : (r & 0x3) | 0x8;
-    return v.toString(16);
-  });
-const toNum = (v, def = null) =>
-  typeof v === 'number' && Number.isFinite(v) ? v : Number.isFinite(+v) ? +v : def;
-
-// ====== MIGRACIJE ======
-const MIGRATE_TOKEN = process.env.MIGRATE_TOKEN || '';
+// ====== MIGRACIJE (auto-run na startu, če je baza nastavljena) ======
 const MIGRATE_SQL = `
-CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+CREATE TABLE IF NOT EXISTS users (
+  id SERIAL PRIMARY KEY,
+  username TEXT UNIQUE NOT NULL,
+  password_hash TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 CREATE TABLE IF NOT EXISTS drops (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  id TEXT PRIMARY KEY,
   title TEXT NOT NULL,
   kind TEXT NOT NULL DEFAULT 'geo',
   status TEXT NOT NULL DEFAULT 'active',
   lat DOUBLE PRECISION,
   lng DOUBLE PRECISION,
   radius_m INTEGER DEFAULT 25,
-  starts_at TIMESTAMPTZ DEFAULT NOW(),
-  expires_at TIMESTAMPTZ,
-  metadata JSONB DEFAULT '{}'::jsonb,
   created_by TEXT,
   claimed_count INTEGER NOT NULL DEFAULT 0,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
-CREATE INDEX IF NOT EXISTS drops_status_idx ON drops (status);
-CREATE INDEX IF NOT EXISTS drops_geo_idx ON drops (lat,lng);
 
 CREATE TABLE IF NOT EXISTS claims (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  drop_id UUID NOT NULL REFERENCES drops(id) ON DELETE CASCADE,
+  id TEXT PRIMARY KEY,
+  drop_id TEXT NOT NULL,
   user_id TEXT NOT NULL,
+  user_name TEXT,
   value NUMERIC(18,8),
   tx_hash TEXT,
   claimed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  UNIQUE(drop_id, user_id)
+  UNIQUE (drop_id, user_id)
 );
+
+CREATE INDEX IF NOT EXISTS drops_status_idx ON drops(status);
+CREATE INDEX IF NOT EXISTS drops_geo_idx ON drops(lat,lng);
+CREATE INDEX IF NOT EXISTS claims_user_idx ON claims(user_id);
 `;
 
-app.get('/health', (_, res) => res.json({ ok: true, db: useDb ? 'pg' : 'memory', version: VERSION }));
-app.get('/version', (_, res) => res.type('text').send(VERSION));
-app.get('/admin/run-migrate', async (req, res) => {
-  try {
-    if (!MIGRATE_TOKEN || req.query.token !== MIGRATE_TOKEN) return res.status(401).json({ ok: false, error: 'NEPOOBLAŠČENO' });
-    if (!useDb) return res.status(400).json({ ok: false, error: 'BREZ_BAZE' });
-    const c = await pool.connect();
+// ====== DB / MEM konfiguracija ======
+let pool = null;
+let useDb = false;
+let Pool = null;
+
+try {
+  Pool = require('pg').Pool;
+} catch (e) {
+  console.log('[DB] pg modul ni na voljo, uporabljam spomin:', e.message);
+}
+
+if (process.env.DATABASE_URL && Pool) {
+  (async () => {
     try {
-      await c.query('BEGIN'); await c.query(MIGRATE_SQL); await c.query('COMMIT');
-      res.json({ ok: true, message: 'Migracije OK' });
-    } catch (e) { await c.query('ROLLBACK'); res.status(500).json({ ok: false, error: e.message }); }
-    finally { c.release(); }
-  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+      const needSsl =
+        process.env.PGSSLMODE === 'require' ||
+        (process.env.DATABASE_URL || '').includes('sslmode=require');
+
+      pool = new Pool({
+        connectionString: process.env.DATABASE_URL,
+        ssl: needSsl ? { rejectUnauthorized: false } : false
+      });
+
+      await pool.query('SELECT 1');
+      console.log('[DB] Povezava na PostgreSQL OK');
+
+      await pool.query(MIGRATE_SQL);
+      console.log('[DB] Migracije OK');
+
+      useDb = true;
+    } catch (err) {
+      console.error('[DB] Napaka pri inicializaciji baze, preklop na spomin:', err.message);
+      pool = null;
+      useDb = false;
+    }
+  })();
+} else {
+  console.log('[DB] DATABASE_URL ni nastavljen → način spomin');
+}
+
+// ====== APP ======
+const app = express();
+app.use(cors({ origin: true, credentials: true }));
+app.use(express.json());
+
+const mem = {
+  users: [],
+  drops: [],
+  claims: []
+};
+
+const uuid = () =>
+  'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === 'x' ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+
+const toNum = (v, def = null) =>
+  typeof v === 'number' && Number.isFinite(v)
+    ? v
+    : Number.isFinite(+v)
+    ? +v
+    : def;
+
+// ====== Health ======
+app.get('/health', async (_req, res) => {
+  res.json({ ok: true, db: useDb ? 'postgres' : 'memory', version: VERSION });
 });
 
-// ====== Pomožna logika ======
-async function listDrops({ status }) {
-  if (!useDb) {
-    const arr = status && status !== 'all'
-      ? mem.drops.filter(d => d.status === status)
-      : mem.drops.slice();
-    return arr.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-  }
-  const where = (status && status !== 'all') ? 'WHERE status=$1' : '';
-  const params = (status && status !== 'all') ? [status] : [];
-  const { rows } = await pool.query(`SELECT * FROM drops ${where} ORDER BY created_at DESC LIMIT 1000`, params);
-  return rows;
-}
-async function getDrop(id) {
-  if (!useDb) return mem.drops.find(d => d.id === id) || null;
-  const { rows } = await pool.query(`SELECT * FROM drops WHERE id=$1`, [id]);
-  return rows[0] || null;
-}
-async function createDrop(data) {
-  const { title, kind = 'geo', lat = null, lng = null, radius_m = 25, metadata = {}, created_by = null } = data || {};
-  if (!title) throw new Error('MANJKA_TITLE');
-  const row = { title, kind: String(kind || 'geo'), lat: toNum(lat, null), lng: toNum(lng, null), radius_m: toNum(radius_m, 25), metadata, created_by };
-  if (!useDb) {
-    const d = { id: uuid(), ...row, status: 'active', claimed_count: 0, created_at: new Date().toISOString() };
-    mem.drops.push(d); return d;
+app.get('/version', (_req, res) => {
+  res.type('text').send(VERSION);
+});
+
+// ====== USERS (registracija / prijava) ======
+async function findUserByUsername(username) {
+  if (!username) return null;
+  if (!useDb || !pool) {
+    return mem.users.find(u => u.username === username) || null;
   }
   const { rows } = await pool.query(
-    `INSERT INTO drops (title,kind,status,lat,lng,radius_m,metadata,created_by)
-     VALUES ($1,$2,'active',$3,$4,$5,$6,$7) RETURNING *`,
-    [row.title, row.kind, row.lat, row.lng, row.radius_m, row.metadata, row.created_by]
+    'SELECT id, username, password_hash FROM users WHERE username = $1',
+    [username]
   );
-  return rows[0];
+  return rows[0] || null;
 }
+
+async function findUserById(userId) {
+  if (!userId) return null;
+  if (!useDb || !pool) {
+    return mem.users.find(u => String(u.id) === String(userId)) || null;
+  }
+  const { rows } = await pool.query(
+    'SELECT id, username FROM users WHERE id = $1',
+    [userId]
+  );
+  return rows[0] || null;
+}
+
+// POST /api/register { username, password }
+app.post('/api/register', async (req, res) => {
+  try {
+    const { username, password } = req.body || {};
+    if (!username || !password) {
+      return res.status(400).json({ ok: false, error: 'MANJKA_UPORABNIK_GESLO' });
+    }
+    const name = String(username).trim().toLowerCase();
+    if (!name) {
+      return res.status(400).json({ ok: false, error: 'NAPACNO_IME' });
+    }
+
+    const existing = await findUserByUsername(name);
+    if (existing) {
+      return res.status(400).json({ ok: false, error: 'UPORABNIK_ZASEDEN' });
+    }
+
+    const hash = await bcrypt.hash(password, 10);
+
+    if (!useDb || !pool) {
+      const id = mem.users.length + 1;
+      const user = {
+        id,
+        username: name,
+        password_hash: hash,
+        created_at: new Date().toISOString()
+      };
+      mem.users.push(user);
+      return res.json({ ok: true, user: { id, username: name } });
+    }
+
+    const { rows } = await pool.query(
+      'INSERT INTO users (username, password_hash) VALUES ($1, $2) RETURNING id, username',
+      [name, hash]
+    );
+    const user = rows[0];
+    res.json({ ok: true, user });
+  } catch (e) {
+    console.error('register error', e);
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// POST /api/login { username, password }
+app.post('/api/login', async (req, res) => {
+  try {
+    const { username, password } = req.body || {};
+    if (!username || !password) {
+      return res.status(400).json({ ok: false, error: 'MANJKA_UPORABNIK_GESLO' });
+    }
+    const name = String(username).trim().toLowerCase();
+    const user = await findUserByUsername(name);
+    if (!user) {
+      return res.status(400).json({ ok: false, error: 'NAPACNI_PODATKI' });
+    }
+
+    const ok = await bcrypt.compare(password, user.password_hash);
+    if (!ok) {
+      return res.status(400).json({ ok: false, error: 'NAPACNI_PODATKI' });
+    }
+
+    res.json({ ok: true, user: { id: user.id, username: user.username } });
+  } catch (e) {
+    console.error('login error', e);
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// ====== DROPS ======
+async function listDrops(status = 'active') {
+  if (!useDb || !pool) {
+    const arr =
+      status && status !== 'all'
+        ? mem.drops.filter(d => d.status === status)
+        : mem.drops.slice();
+    return arr.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+  }
+
+  const params = [];
+  let where = '';
+  if (status && status !== 'all') {
+    where = 'WHERE status = $1';
+    params.push(status);
+  }
+  const { rows } = await pool.query(
+    `SELECT * FROM drops ${where} ORDER BY created_at DESC LIMIT 1000`,
+    params
+  );
+  return rows;
+}
+
+async function getDrop(id) {
+  if (!id) return null;
+  if (!useDb || !pool) {
+    return mem.drops.find(d => d.id === id) || null;
+  }
+  const { rows } = await pool.query('SELECT * FROM drops WHERE id = $1', [id]);
+  return rows[0] || null;
+}
+
+async function createDrop(data) {
+  const { title, kind = 'geo', lat = null, lng = null, radius_m = 25, created_by = null } =
+    data || {};
+  if (!title) throw new Error('MANJKA_TITLE');
+
+  const row = {
+    id: uuid(),
+    title: String(title),
+    kind: String(kind || 'geo'),
+    lat: toNum(lat, null),
+    lng: toNum(lng, null),
+    radius_m: toNum(radius_m, 25),
+    status: 'active',
+    claimed_count: 0,
+    created_by
+  };
+
+  if (!useDb || !pool) {
+    row.created_at = new Date().toISOString();
+    mem.drops.push(row);
+    return row;
+  }
+
+  await pool.query(
+    `INSERT INTO drops (id,title,kind,status,lat,lng,radius_m,created_by,claimed_count)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+    [
+      row.id,
+      row.title,
+      row.kind,
+      row.status,
+      row.lat,
+      row.lng,
+      row.radius_m,
+      row.created_by,
+      0
+    ]
+  );
+  const full = await getDrop(row.id);
+  return full || row;
+}
+
 async function updateDrop(id, patch) {
-  const fields = ['title', 'lat', 'lng', 'radius_m', 'status', 'metadata'];
-  const obj = {}; fields.forEach(f => { if (patch[f] !== undefined) obj[f] = patch[f]; });
+  if (!id) return null;
+  const fields = ['title', 'lat', 'lng', 'radius_m', 'status'];
+  const obj = {};
+  fields.forEach(f => {
+    if (patch[f] !== undefined) obj[f] = patch[f];
+  });
   if (!Object.keys(obj).length) return await getDrop(id);
 
-  if (!useDb) {
-    const d = mem.drops.find(x => x.id === id); if (!d) return null;
+  if (!useDb || !pool) {
+    const d = mem.drops.find(x => x.id === id);
+    if (!d) return null;
     Object.assign(d, {
       title: obj.title ?? d.title,
       lat: obj.lat !== undefined ? toNum(obj.lat, null) : d.lat,
       lng: obj.lng !== undefined ? toNum(obj.lng, null) : d.lng,
-      radius_m: obj.radius_m !== undefined ? toNum(obj.radius_m, d.radius_m) : d.radius_m,
-      status: obj.status ?? d.status,
-      metadata: obj.metadata ?? d.metadata
+      radius_m:
+        obj.radius_m !== undefined ? toNum(obj.radius_m, d.radius_m) : d.radius_m,
+      status: obj.status ?? d.status
     });
     return d;
   }
-  const sets = [], vals = []; let i = 1;
-  for (const k of Object.keys(obj)) { sets.push(`${k}=$${i++}`); vals.push(k === 'radius_m' ? toNum(obj[k], null) : obj[k]); }
-  vals.push(id);
-  const { rows } = await pool.query(`UPDATE drops SET ${sets.join(',')} WHERE id=$${i} RETURNING *`, vals);
-  return rows[0] || null;
+
+  const cols = [];
+  const params = [];
+  let i = 1;
+  for (const [k, v] of Object.entries(obj)) {
+    cols.push(`${k} = $${i++}`);
+    params.push(k === 'radius_m' ? toNum(v, null) : v);
+  }
+  params.push(id);
+  await pool.query(`UPDATE drops SET ${cols.join(', ')} WHERE id = $${i}`, params);
+  return await getDrop(id);
 }
+
 async function deleteDrop(id) {
-  if (!useDb) {
+  if (!id) return false;
+
+  if (!useDb || !pool) {
     const idx = mem.drops.findIndex(d => d.id === id);
     if (idx === -1) return false;
     mem.drops.splice(idx, 1);
-    for (let i = mem.claims.length - 1; i >= 0; i--) if (mem.claims[i].drop_id === id) mem.claims.splice(i, 1);
+    for (let i = mem.claims.length - 1; i >= 0; i--) {
+      if (mem.claims[i].drop_id === id) mem.claims.splice(i, 1);
+    }
     return true;
   }
-  await pool.query(`DELETE FROM claims WHERE drop_id=$1`, [id]);
-  const r = await pool.query(`DELETE FROM drops WHERE id=$1`, [id]);
-  return r.rowCount > 0;
-}
-function toRad(x){ return x * Math.PI/180; }
-function distanceMeters(a,b){
-  const R=6371000,dLat=toRad(b.lat-a.lat),dLon=toRad(b.lng-a.lng);
-  const la1=toRad(a.lat),la2=toRad(b.lat);
-  const x=Math.sin(dLat/2)**2 + Math.cos(la1)*Math.cos(la2)*Math.sin(dLon/2)**2;
-  return 2*R*Math.asin(Math.sqrt(x));
-}
-async function createClaim({ drop_id, user_id, value = null, tx_hash = null, lat = null, lng = null }) {
-  if (!drop_id || !user_id) throw new Error('SLAB_PODATEK');
-  const d = await getDrop(drop_id);
-  if (!d) throw new Error('DROP_NE_OBSTAJA');
 
-  if (d.lat != null && d.lng != null && lat != null && lng != null) {
-    const dist = distanceMeters({ lat, lng }, { lat: d.lat, lng: d.lng });
-    if (d.radius_m != null && dist > d.radius_m) {
-      const left = Math.max(0, Math.round(dist - d.radius_m));
-      const err = new Error(`PREDALec:${left}`); err.code='TOO_FAR'; throw err;
+  await pool.query('DELETE FROM claims WHERE drop_id = $1', [id]);
+  const result = await pool.query('DELETE FROM drops WHERE id = $1', [id]);
+  return result.rowCount > 0;
+}
+
+// ====== RAZDALJA ======
+function toRad(x) {
+  return (x * Math.PI) / 180;
+}
+function distanceMeters(a, b) {
+  const R = 6371000;
+  const dLat = toRad(b.lat - a.lat);
+  const dLon = toRad(b.lng - a.lng);
+  const la1 = toRad(a.lat);
+  const la2 = toRad(b.lat);
+  const x =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(la1) * Math.cos(la2) * Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(x));
+}
+
+// ====== CLAIMS ======
+async function createClaim({
+  drop_id,
+  user_id,
+  user_name = null,
+  value = null,
+  tx_hash = null,
+  lat = null,
+  lng = null
+}) {
+  if (!drop_id || !user_id) throw new Error('SLABI_PODATKI');
+
+  const drop = await getDrop(drop_id);
+  if (!drop) throw new Error('DROP_NE_OBSTAJA');
+
+  if (drop.lat != null && drop.lng != null && lat != null && lng != null) {
+    const dist = distanceMeters({ lat, lng }, { lat: drop.lat, lng: drop.lng });
+    if (drop.radius_m != null && dist > drop.radius_m) {
+      const left = Math.max(0, Math.round(dist - drop.radius_m));
+      const err = new Error('PREDALEC:' + left);
+      err.code = 'TOO_FAR';
+      throw err;
     }
   }
 
-  if (!useDb) {
-    if (mem.claims.find(c => c.drop_id === drop_id && c.user_id === user_id))
+  if (!useDb || !pool) {
+    if (
+      mem.claims.find(
+        c => c.drop_id === drop_id && String(c.user_id) === String(user_id)
+      )
+    ) {
       throw new Error('ZE_CLAIMANO');
-    const claim = { id: uuid(), drop_id, user_id, value: toNum(value, null), tx_hash, claimed_at: new Date().toISOString() };
+    }
+    const claim = {
+      id: uuid(),
+      drop_id,
+      user_id: String(user_id),
+      user_name: user_name || null,
+      value: toNum(value, null),
+      tx_hash,
+      claimed_at: new Date().toISOString()
+    };
     mem.claims.push(claim);
-    const dd = mem.drops.find(x => x.id === drop_id); if (dd) dd.claimed_count = (dd.claimed_count || 0) + 1;
+    const d = mem.drops.find(x => x.id === drop_id);
+    if (d) d.claimed_count = (d.claimed_count || 0) + 1;
     return claim;
   }
-  const c = await pool.connect();
+
+  const client = await pool.connect();
   try {
-    await c.query('BEGIN');
-    const ins = await c.query(
-      `INSERT INTO claims (drop_id,user_id,value,tx_hash)
-       VALUES ($1,$2,$3,$4) ON CONFLICT (drop_id,user_id) DO NOTHING RETURNING *`,
-      [drop_id, user_id, toNum(value, null), tx_hash]
+    await client.query('BEGIN');
+
+    const check = await client.query(
+      'SELECT id FROM claims WHERE drop_id=$1 AND user_id=$2',
+      [drop_id, String(user_id)]
     );
-    const claim = ins.rows[0];
-    if (!claim) { await c.query('ROLLBACK'); throw new Error('ZE_CLAIMANO'); }
-    await c.query(`UPDATE drops SET claimed_count=claimed_count+1 WHERE id=$1`, [drop_id]);
-    await c.query('COMMIT');
-    return claim;
-  } catch (e) { await c.query('ROLLBACK'); throw e; }
-  finally { c.release(); }
+    if (check.rowCount > 0) {
+      await client.query('ROLLBACK');
+      throw new Error('ZE_CLAIMANO');
+    }
+
+    const id = uuid();
+    await client.query(
+      'INSERT INTO claims (id,drop_id,user_id,user_name,value,tx_hash) VALUES ($1,$2,$3,$4,$5,$6)',
+      [id, drop_id, String(user_id), user_name, toNum(value, null), tx_hash]
+    );
+    await client.query(
+      'UPDATE drops SET claimed_count = claimed_count + 1 WHERE id = $1',
+      [drop_id]
+    );
+
+    const { rows } = await client.query('SELECT * FROM claims WHERE id = $1', [id]);
+
+    await client.query('COMMIT');
+    return rows[0];
+  } catch (e) {
+    await client.query('ROLLBACK');
+    throw e;
+  } finally {
+    client.release();
+  }
 }
 
-// ====== REST ======
-// Drops
-app.get(['/api/drops','/drops'], async (req,res)=>{
-  try { res.json(await listDrops({ status: req.query.status || 'active' })); }
-  catch(e){ res.status(500).json({ ok:false, error:e.message }); }
-});
-app.post(['/api/drops','/drops'], async (req,res)=>{
-  try { const d = await createDrop(req.body); io.emit('drop:created', d); res.json({ ok:true, drop:d }); }
-  catch(e){ res.status(400).json({ ok:false, error:e.message }); }
-});
-app.patch(['/api/drops/:id','/drops/:id'], async (req,res)=>{
-  try { const d = await updateDrop(req.params.id, req.body); if(!d) return res.status(404).json({ ok:false, error:'NE_OBSTAJA' }); io.emit('drop:updated', d); res.json({ ok:true, drop:d }); }
-  catch(e){ res.status(400).json({ ok:false, error:e.message }); }
-});
-app.delete(['/api/drops/:id','/drops/:id'], async (req,res)=>{
-  try { const ok = await deleteDrop(req.params.id); if(!ok) return res.status(404).json({ ok:false, error:'NE_OBSTAJA' }); io.emit('drop:deleted', { id:req.params.id }); res.json({ ok:true }); }
-  catch(e){ res.status(500).json({ ok:false, error:e.message }); }
+// ====== REST – DROPS ======
+app.get(['/api/drops', '/drops'], async (req, res) => {
+  try {
+    const status = req.query.status || 'active';
+    const rows = await listDrops(status);
+    res.json(rows);
+  } catch (e) {
+    console.error('drops list', e);
+    res.status(500).json({ ok: false, error: e.message });
+  }
 });
 
-// Claims / Rewards
-app.post(['/api/claims','/claims'], async (req,res)=>{
-  try { const c = await createClaim(req.body); io.emit('claim:created', c); res.json({ ok:true, claim:c }); }
-  catch(e){ res.status(e.code==='TOO_FAR'?403:400).json({ ok:false, error:e.message }); }
+app.post(['/api/drops', '/drops'], async (req, res) => {
+  try {
+    const drop = await createDrop(req.body);
+    io.emit('drop:created', drop);
+    res.json({ ok: true, drop });
+  } catch (e) {
+    res.status(400).json({ ok: false, error: e.message });
+  }
 });
-app.get(['/api/claims','/claims'], async (req,res)=>{
-  const { user_id } = req.query;
-  if(!user_id) return res.status(400).json({ ok:false, error:'MANJKA_user_id' });
-  if(!useDb){
+
+app.patch(['/api/drops/:id', '/drops/:id'], async (req, res) => {
+  try {
+    const d = await updateDrop(req.params.id, req.body);
+    if (!d) return res.status(404).json({ ok: false, error: 'NE_OBSTAJA' });
+    io.emit('drop:updated', d);
+    res.json({ ok: true, drop: d });
+  } catch (e) {
+    res.status(400).json({ ok: false, error: e.message });
+  }
+});
+
+app.delete(['/api/drops/:id', '/drops/:id'], async (req, res) => {
+  try {
+    const ok = await deleteDrop(req.params.id);
+    if (!ok) return res.status(404).json({ ok: false, error: 'NE_OBSTAJA' });
+    io.emit('drop:deleted', { id: req.params.id });
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// ====== REST – CLAIMS & NAGRADE ======
+app.post(['/api/claims', '/claims'], async (req, res) => {
+  try {
+    const claim = await createClaim(req.body || {});
+    io.emit('claim:created', claim);
+    res.json({ ok: true, claim });
+  } catch (e) {
+    res
+      .status(e.code === 'TOO_FAR' ? 403 : 400)
+      .json({ ok: false, error: e.message });
+  }
+});
+
+// GET /api/claims?user_id=...
+app.get(['/api/claims', '/claims'], async (req, res) => {
+  const user_id = req.query.user_id;
+  if (!user_id) {
+    return res.status(400).json({ ok: false, error: 'MANJKA_user_id' });
+  }
+
+  if (!useDb || !pool) {
     const rows = mem.claims
-      .filter(c=>c.user_id===user_id)
-      .map(c=>({ ...c, drop: mem.drops.find(d=>d.id===c.drop_id) || null }))
-      .sort((a,b)=>new Date(b.claimed_at)-new Date(a.claimed_at));
+      .filter(c => String(c.user_id) === String(user_id))
+      .map(c => ({
+        ...c,
+        drop: mem.drops.find(d => d.id === c.drop_id) || null
+      }))
+      .sort((a, b) => new Date(b.claimed_at) - new Date(a.claimed_at));
     return res.json(rows);
   }
-  try{
+
+  try {
     const { rows } = await pool.query(
-      `SELECT c.*, to_json(d.*) AS drop
-       FROM claims c LEFT JOIN drops d ON d.id=c.drop_id
-       WHERE c.user_id=$1 ORDER BY c.claimed_at DESC LIMIT 500`, [user_id]
+      `SELECT c.*, d.title AS drop_title, d.radius_m AS drop_radius_m,
+              d.lat AS drop_lat, d.lng AS drop_lng
+       FROM claims c
+       LEFT JOIN drops d ON d.id = c.drop_id
+       WHERE c.user_id = $1
+       ORDER BY c.claimed_at DESC
+       LIMIT 500`,
+      [String(user_id)]
     );
-    res.json(rows);
-  }catch(e){ res.status(500).json({ ok:false, error:e.message }); }
-});
 
-// Statistika
-app.get(['/api/stats','/stats'], async (_req,res)=>{
-  if(!useDb){
-    const last = mem.claims[mem.claims.length-1] || null;
-    return res.json({ totals:{ drops:mem.drops.length, claims:mem.claims.length }, lastClaim:last });
+    const mapped = rows.map(r => ({
+      id: r.id,
+      drop_id: r.drop_id,
+      user_id: r.user_id,
+      user_name: r.user_name,
+      value: r.value,
+      tx_hash: r.tx_hash,
+      claimed_at: r.claimed_at,
+      drop: {
+        id: r.drop_id,
+        title: r.drop_title,
+        radius_m: r.drop_radius_m,
+        lat: r.drop_lat,
+        lng: r.drop_lng
+      }
+    }));
+
+    res.json(mapped);
+  } catch (e) {
+    console.error('claims list', e);
+    res.status(500).json({ ok: false, error: e.message });
   }
-  try{
-    const r1 = await pool.query(`SELECT COUNT(*)::int AS c FROM drops`);
-    const r2 = await pool.query(`SELECT COUNT(*)::int AS c FROM claims`);
-    const r3 = await pool.query(`SELECT * FROM claims ORDER BY claimed_at DESC LIMIT 1`);
-    res.json({ totals:{ drops:r1.rows[0].c, claims:r2.rows[0].c }, lastClaim:r3.rows[0] || null });
-  }catch(e){ res.status(500).json({ ok:false, error:e.message }); }
 });
 
-// ====== Socket.IO ======
+// ====== STATS ======
+app.get(['/api/stats', '/stats'], async (_req, res) => {
+  if (!useDb || !pool) {
+    const last = mem.claims[mem.claims.length - 1] || null;
+    return res.json({
+      totals: { drops: mem.drops.length, claims: mem.claims.length },
+      lastClaim: last
+    });
+  }
+
+  try {
+    const c1 = await pool.query('SELECT COUNT(*)::int AS c FROM drops');
+    const c2 = await pool.query('SELECT COUNT(*)::int AS c FROM claims');
+    const last = await pool.query(
+      'SELECT * FROM claims ORDER BY claimed_at DESC LIMIT 1'
+    );
+
+    res.json({
+      totals: {
+        drops: c1.rows[0].c || 0,
+        claims: c2.rows[0].c || 0
+      },
+      lastClaim: last.rows[0] || null
+    });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// ====== SOCKET.IO ======
 const httpServer = createServer(app);
-const io = new Server(httpServer, { cors:{ origin:true, methods:['GET','POST','PATCH','DELETE'] } });
-io.on('connection', (socket)=>{ socket.emit('hello', { version: VERSION }); });
+const io = new Server(httpServer, {
+  cors: { origin: true, methods: ['GET', 'POST', 'PATCH', 'DELETE'] }
+});
+
+io.on('connection', socket => {
+  socket.emit('hello', { version: VERSION });
+});
 
 const PORT = process.env.PORT || 3000;
-httpServer.listen(PORT, ()=>console.log(`MoveServer posluša na :${PORT}`));
+httpServer.listen(PORT, () => {
+  console.log(`MoveServer (Postgres + auth) teče na :${PORT}`);
+});
