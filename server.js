@@ -1,5 +1,5 @@
-// MoveServer – demo verzija (Postgres ali spomin, uporabniki + dropi + claimi)
-// NAVADNI CJS (require), brez "type": "module" v package.json
+// MoveServer – PostgreSQL + username/password + drops/claims/statistika
+// CJS (brez "type": "module")
 
 const express = require('express');
 const cors = require('cors');
@@ -7,12 +7,9 @@ const { createServer } = require('http');
 const { Server } = require('socket.io');
 const bcrypt = require('bcryptjs');
 
-const VERSION = 'move-demo-v1-2025-11-17';
+const VERSION = 'pg-auth-v1.1-username-fix';
 
-// =====================================================
-// MIGRACIJE
-// =====================================================
-
+// ====== MIGRACIJE (auto-run na startu, če je baza nastavljena) ======
 const MIGRATE_SQL = `
 CREATE TABLE IF NOT EXISTS users (
   id SERIAL PRIMARY KEY,
@@ -46,14 +43,16 @@ CREATE TABLE IF NOT EXISTS claims (
 );
 
 CREATE INDEX IF NOT EXISTS drops_status_idx ON drops(status);
-CREATE INDEX IF NOT EXISTS drops_geo_idx   ON drops(lat,lng);
+CREATE INDEX IF NOT EXISTS drops_geo_idx ON drops(lat,lng);
 CREATE INDEX IF NOT EXISTS claims_user_idx ON claims(user_id);
+
+/* --- dodatne ALTER-je za obstoječe tabele (stare verzije) --- */
+ALTER TABLE claims ADD COLUMN IF NOT EXISTS user_name TEXT;
+ALTER TABLE claims ADD COLUMN IF NOT EXISTS value NUMERIC(18,8);
+ALTER TABLE claims ADD COLUMN IF NOT EXISTS tx_hash TEXT;
 `;
 
-// =====================================================
-// DB / MEMORY
-// =====================================================
-
+// ====== DB / MEM konfiguracija ======
 let pool = null;
 let useDb = false;
 let Pool = null;
@@ -93,10 +92,7 @@ if (process.env.DATABASE_URL && Pool) {
   console.log('[DB] DATABASE_URL ni nastavljen → način spomin');
 }
 
-// =====================================================
-// APP
-// =====================================================
-
+// ====== APP ======
 const app = express();
 app.use(cors({ origin: true, credentials: true }));
 app.use(express.json());
@@ -107,7 +103,6 @@ const mem = {
   claims: []
 };
 
-// helperji
 const uuid = () =>
   'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
     const r = (Math.random() * 16) | 0;
@@ -122,11 +117,8 @@ const toNum = (v, def = null) =>
     ? +v
     : def;
 
-// =====================================================
-// HEALTH
-// =====================================================
-
-app.get('/health', (_req, res) => {
+// ====== Health ======
+app.get('/health', async (_req, res) => {
   res.json({ ok: true, db: useDb ? 'postgres' : 'memory', version: VERSION });
 });
 
@@ -134,32 +126,24 @@ app.get('/version', (_req, res) => {
   res.type('text').send(VERSION);
 });
 
-// =====================================================
-// USERS – registracija / prijava
-// =====================================================
-
+// ====== USERS (registracija / prijava) ======
 async function findUserByUsername(username) {
   if (!username) return null;
-  const name = String(username).trim().toLowerCase();
-
   if (!useDb || !pool) {
-    return mem.users.find(u => u.username === name) || null;
+    return mem.users.find(u => u.username === username) || null;
   }
-
   const { rows } = await pool.query(
     'SELECT id, username, password_hash FROM users WHERE username = $1',
-    [name]
+    [username]
   );
   return rows[0] || null;
 }
 
 async function findUserById(userId) {
   if (!userId) return null;
-
   if (!useDb || !pool) {
     return mem.users.find(u => String(u.id) === String(userId)) || null;
   }
-
   const { rows } = await pool.query(
     'SELECT id, username FROM users WHERE id = $1',
     [userId]
@@ -167,14 +151,13 @@ async function findUserById(userId) {
   return rows[0] || null;
 }
 
-// POST /api/register
+// POST /api/register { username, password }
 app.post('/api/register', async (req, res) => {
   try {
     const { username, password } = req.body || {};
     if (!username || !password) {
       return res.status(400).json({ ok: false, error: 'MANJKA_UPORABNIK_GESLO' });
     }
-
     const name = String(username).trim().toLowerCase();
     if (!name) {
       return res.status(400).json({ ok: false, error: 'NAPACNO_IME' });
@@ -204,7 +187,6 @@ app.post('/api/register', async (req, res) => {
       [name, hash]
     );
     const user = rows[0];
-
     res.json({ ok: true, user });
   } catch (e) {
     console.error('register error', e);
@@ -212,15 +194,15 @@ app.post('/api/register', async (req, res) => {
   }
 });
 
-// POST /api/login
+// POST /api/login { username, password }
 app.post('/api/login', async (req, res) => {
   try {
     const { username, password } = req.body || {};
     if (!username || !password) {
       return res.status(400).json({ ok: false, error: 'MANJKA_UPORABNIK_GESLO' });
     }
-
-    const user = await findUserByUsername(username);
+    const name = String(username).trim().toLowerCase();
+    const user = await findUserByUsername(name);
     if (!user) {
       return res.status(400).json({ ok: false, error: 'NAPACNI_PODATKI' });
     }
@@ -237,10 +219,7 @@ app.post('/api/login', async (req, res) => {
   }
 });
 
-// =====================================================
-// DROPS
-// =====================================================
-
+// ====== DROPS ======
 async function listDrops(status = 'active') {
   if (!useDb || !pool) {
     const arr =
@@ -256,7 +235,6 @@ async function listDrops(status = 'active') {
     where = 'WHERE status = $1';
     params.push(status);
   }
-
   const { rows } = await pool.query(
     `SELECT * FROM drops ${where} ORDER BY created_at DESC LIMIT 1000`,
     params
@@ -266,11 +244,9 @@ async function listDrops(status = 'active') {
 
 async function getDrop(id) {
   if (!id) return null;
-
   if (!useDb || !pool) {
     return mem.drops.find(d => d.id === id) || null;
   }
-
   const { rows } = await pool.query('SELECT * FROM drops WHERE id = $1', [id]);
   return rows[0] || null;
 }
@@ -313,14 +289,12 @@ async function createDrop(data) {
       0
     ]
   );
-
   const full = await getDrop(row.id);
   return full || row;
 }
 
 async function updateDrop(id, patch) {
   if (!id) return null;
-
   const fields = ['title', 'lat', 'lng', 'radius_m', 'status'];
   const obj = {};
   fields.forEach(f => {
@@ -331,7 +305,6 @@ async function updateDrop(id, patch) {
   if (!useDb || !pool) {
     const d = mem.drops.find(x => x.id === id);
     if (!d) return null;
-
     Object.assign(d, {
       title: obj.title ?? d.title,
       lat: obj.lat !== undefined ? toNum(obj.lat, null) : d.lat,
@@ -340,7 +313,6 @@ async function updateDrop(id, patch) {
         obj.radius_m !== undefined ? toNum(obj.radius_m, d.radius_m) : d.radius_m,
       status: obj.status ?? d.status
     });
-
     return d;
   }
 
@@ -352,7 +324,6 @@ async function updateDrop(id, patch) {
     params.push(k === 'radius_m' ? toNum(v, null) : v);
   }
   params.push(id);
-
   await pool.query(`UPDATE drops SET ${cols.join(', ')} WHERE id = $${i}`, params);
   return await getDrop(id);
 }
@@ -364,7 +335,6 @@ async function deleteDrop(id) {
     const idx = mem.drops.findIndex(d => d.id === id);
     if (idx === -1) return false;
     mem.drops.splice(idx, 1);
-
     for (let i = mem.claims.length - 1; i >= 0; i--) {
       if (mem.claims[i].drop_id === id) mem.claims.splice(i, 1);
     }
@@ -376,14 +346,10 @@ async function deleteDrop(id) {
   return result.rowCount > 0;
 }
 
-// =====================================================
-// RAZDALJA
-// =====================================================
-
+// ====== RAZDALJA ======
 function toRad(x) {
   return (x * Math.PI) / 180;
 }
-
 function distanceMeters(a, b) {
   const R = 6371000;
   const dLat = toRad(b.lat - a.lat);
@@ -396,13 +362,7 @@ function distanceMeters(a, b) {
   return 2 * R * Math.asin(Math.sqrt(x));
 }
 
-// =====================================================
-// CLAIMS
-// =====================================================
-
-// POZOR: tukaj NAMERNO NE preverjamo, ali user obstaja v tabeli users.
-// Za demo je dovolj, da pride user_id iz aplikacije.
-
+// ====== CLAIMS ======
 async function createClaim({
   drop_id,
   user_id,
@@ -417,7 +377,6 @@ async function createClaim({
   const drop = await getDrop(drop_id);
   if (!drop) throw new Error('DROP_NE_OBSTAJA');
 
-  // razdalja
   if (drop.lat != null && drop.lng != null && lat != null && lng != null) {
     const dist = distanceMeters({ lat, lng }, { lat: drop.lat, lng: drop.lng });
     if (drop.radius_m != null && dist > drop.radius_m) {
@@ -428,13 +387,14 @@ async function createClaim({
     }
   }
 
-  // memory način
   if (!useDb || !pool) {
-    const already = mem.claims.find(
-      c => c.drop_id === drop_id && String(c.user_id) === String(user_id)
-    );
-    if (already) throw new Error('ZE_CLAIMANO');
-
+    if (
+      mem.claims.find(
+        c => c.drop_id === drop_id && String(c.user_id) === String(user_id)
+      )
+    ) {
+      throw new Error('ZE_CLAIMANO');
+    }
     const claim = {
       id: uuid(),
       drop_id,
@@ -444,16 +404,12 @@ async function createClaim({
       tx_hash,
       claimed_at: new Date().toISOString()
     };
-
     mem.claims.push(claim);
-
     const d = mem.drops.find(x => x.id === drop_id);
     if (d) d.claimed_count = (d.claimed_count || 0) + 1;
-
     return claim;
   }
 
-  // Postgres – transakcija
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -489,10 +445,7 @@ async function createClaim({
   }
 }
 
-// =====================================================
-// REST – DROPS
-// =====================================================
-
+// ====== REST – DROPS ======
 app.get(['/api/drops', '/drops'], async (req, res) => {
   try {
     const status = req.query.status || 'active';
@@ -536,10 +489,7 @@ app.delete(['/api/drops/:id', '/drops/:id'], async (req, res) => {
   }
 });
 
-// =====================================================
-// REST – CLAIMS & NAGRADE
-// =====================================================
-
+// ====== REST – CLAIMS & NAGRADE ======
 app.post(['/api/claims', '/claims'], async (req, res) => {
   try {
     const claim = await createClaim(req.body || {});
@@ -606,10 +556,7 @@ app.get(['/api/claims', '/claims'], async (req, res) => {
   }
 });
 
-// =====================================================
-// STATS
-// =====================================================
-
+// ====== STATS ======
 app.get(['/api/stats', '/stats'], async (_req, res) => {
   if (!useDb || !pool) {
     const last = mem.claims[mem.claims.length - 1] || null;
@@ -638,10 +585,7 @@ app.get(['/api/stats', '/stats'], async (_req, res) => {
   }
 });
 
-// =====================================================
-// SOCKET.IO & START
-// =====================================================
-
+// ====== SOCKET.IO ======
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
   cors: { origin: true, methods: ['GET', 'POST', 'PATCH', 'DELETE'] }
@@ -653,5 +597,5 @@ io.on('connection', socket => {
 
 const PORT = process.env.PORT || 3000;
 httpServer.listen(PORT, () => {
-  console.log(`MoveServer demo teče na :${PORT}`);
+  console.log(`MoveServer (Postgres + auth) teče na :${PORT}`);
 });
