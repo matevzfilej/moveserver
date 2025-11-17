@@ -7,7 +7,7 @@ const { createServer } = require('http');
 const { Server } = require('socket.io');
 const bcrypt = require('bcryptjs');
 
-const VERSION = 'pg-auth-v1.0-sl';
+const VERSION = 'pg-auth-v2-2025-11-17';
 
 // ====== MIGRACIJE (auto-run na startu, če je baza nastavljena) ======
 const MIGRATE_SQL = `
@@ -92,12 +92,14 @@ const app = express();
 app.use(cors({ origin: true, credentials: true }));
 app.use(express.json());
 
+// spominska baza, če PostgreSQL ni na voljo
 const mem = {
   users: [],
   drops: [],
   claims: []
 };
 
+// helperji
 const uuid = () =>
   'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
     const r = (Math.random() * 16) | 0;
@@ -112,7 +114,7 @@ const toNum = (v, def = null) =>
     ? +v
     : def;
 
-// ====== Health ======
+// ====== Health / Version ======
 app.get('/health', async (_req, res) => {
   res.json({ ok: true, db: useDb ? 'postgres' : 'memory', version: VERSION });
 });
@@ -551,35 +553,6 @@ app.get(['/api/claims', '/claims'], async (req, res) => {
   }
 });
 
-// ====== STATS ======
-app.get(['/api/stats', '/stats'], async (_req, res) => {
-  if (!useDb || !pool) {
-    const last = mem.claims[mem.claims.length - 1] || null;
-    return res.json({
-      totals: { drops: mem.drops.length, claims: mem.claims.length },
-      lastClaim: last
-    });
-  }
-
-  try {
-    const c1 = await pool.query('SELECT COUNT(*)::int AS c FROM drops');
-    const c2 = await pool.query('SELECT COUNT(*)::int AS c FROM claims');
-    const last = await pool.query(
-      'SELECT * FROM claims ORDER BY claimed_at DESC LIMIT 1'
-    );
-
-    res.json({
-      totals: {
-        drops: c1.rows[0].c || 0,
-        claims: c2.rows[0].c || 0
-      },
-      lastClaim: last.rows[0] || null
-    });
-  } catch (e) {
-    res.status(500).json({ ok: false, error: e.message });
-  }
-});
-
 // ====== SOCKET.IO ======
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
@@ -590,6 +563,7 @@ io.on('connection', socket => {
   socket.emit('hello', { version: VERSION });
 });
 
+// ====== START ======
 const PORT = process.env.PORT || 3000;
 httpServer.listen(PORT, () => {
   console.log(`MoveServer (Postgres + auth) teče na :${PORT}`);
