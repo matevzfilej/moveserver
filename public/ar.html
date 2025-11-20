@@ -8,10 +8,6 @@
       content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
     />
 
-    <!-- A-Frame + MindAR samo za kamero -->
-    <script src="https://aframe.io/releases/1.6.0/aframe.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-aframe.prod.js"></script>
-
     <style>
       html,
       body {
@@ -25,25 +21,34 @@
         color: #f5f7ff;
       }
 
-      .ar-overlay {
+      .wrapper {
         position: fixed;
         inset: 0;
-        z-index: 1;
+        background: #000;
         display: flex;
-        flex-direction: column;
+        align-items: stretch;
+        justify-content: center;
       }
 
-      a-scene {
+      /* kamera v ozadju */
+      #camera {
         width: 100%;
         height: 100%;
+        object-fit: cover;
       }
 
-      .ar-topbar {
+      /* overlay nad kamero */
+      .overlay {
+        position: absolute;
+        inset: 0;
+        pointer-events: none; /* default, samo gumbi imajo auto */
+      }
+
+      .topbar {
         position: absolute;
         top: 8px;
         left: 0;
         right: 0;
-        z-index: 10;
         display: flex;
         justify-content: space-between;
         align-items: center;
@@ -51,7 +56,7 @@
         pointer-events: none;
       }
 
-      .ar-btn {
+      .btn {
         pointer-events: auto;
         border: none;
         border-radius: 999px;
@@ -63,32 +68,102 @@
         cursor: pointer;
       }
 
-      .ar-title {
+      .title {
         font-size: 14px;
         opacity: 0.85;
       }
 
-      .ar-bottom {
+      /* PIN na sredini */
+      .pin-wrapper {
         position: absolute;
-        bottom: 10px;
-        left: 0;
-        right: 0;
-        text-align: center;
-        padding: 6px 12px 52px;
-        font-size: 13px;
-        opacity: 0.9;
+        left: 50%;
+        top: 50%;
+        transform: translate(-50%, -55%);
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 10px;
         pointer-events: none;
       }
 
-      .ar-bottom-inner {
+      .pin {
+        width: 110px;
+        height: 110px;
+        border-radius: 50%;
+        background: radial-gradient(circle at 30% 20%, #ffffff, #00ffe6 35%, #0c2830 65%);
+        box-shadow: 0 0 30px rgba(0, 255, 214, 0.9);
+        position: relative;
         pointer-events: auto;
+        cursor: pointer;
+      }
+
+      .pin::after {
+        content: "";
+        position: absolute;
+        left: 50%;
+        top: 18%;
+        transform: translateX(-50%);
+        width: 18px;
+        height: 48px;
+        border-radius: 999px;
+        background: linear-gradient(180deg, #ffffff, #00ffe6);
+        box-shadow: 0 0 18px rgba(0, 255, 214, 0.9);
+      }
+
+      .pin-ring {
+        position: absolute;
+        bottom: -14px;
+        left: 50%;
+        transform: translateX(-50%);
+        width: 60px;
+        height: 18px;
+        border-radius: 50%;
+        background: radial-gradient(
+          ellipse at center,
+          rgba(0, 255, 190, 0.7),
+          rgba(0, 0, 0, 0)
+        );
+        animation: pulse 1.8s infinite ease-out;
+      }
+
+      @keyframes pulse {
+        0% {
+          transform: translateX(-50%) scale(1);
+          opacity: 0.85;
+        }
+        100% {
+          transform: translateX(-50%) scale(1.6);
+          opacity: 0;
+        }
+      }
+
+      .pin-label {
+        font-size: 13px;
+        background: rgba(0, 0, 0, 0.55);
+        padding: 4px 10px;
+        border-radius: 999px;
+        backdrop-filter: blur(10px);
+      }
+
+      /* spodnji tekst + gumb */
+      .bottom {
+        position: absolute;
+        left: 0;
+        right: 0;
+        bottom: 10px;
+        text-align: center;
+        pointer-events: none;
+      }
+
+      .bottom-inner {
         display: inline-flex;
         flex-direction: column;
         gap: 6px;
         align-items: center;
+        pointer-events: auto;
       }
 
-      .ar-claim-btn {
+      .claim-btn {
         border-radius: 999px;
         border: none;
         padding: 10px 24px;
@@ -98,6 +173,11 @@
         font-weight: 600;
         box-shadow: 0 8px 22px rgba(0, 0, 0, 0.45);
         cursor: pointer;
+      }
+
+      .hint {
+        font-size: 13px;
+        text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
       }
 
       .toast {
@@ -121,112 +201,93 @@
     </style>
   </head>
   <body>
-    <div class="ar-overlay">
-      <div class="ar-topbar">
-        <button class="ar-btn" id="btnClose">✕ Zapri</button>
-        <span class="ar-title" id="titleLabel">Move • AR prevzem</span>
-      </div>
+    <div class="wrapper">
+      <video id="camera" autoplay playsinline muted></video>
 
-      <!-- AR SCENE -->
-      <a-scene
-        mindar-image="imageTargetSrc: ./mind/targets.mind; autoStart: true; uiError: no; uiScanning: no; uiLoading: yes;"
-        embedded
-        vr-mode-ui="enabled: false"
-        device-orientation-permission-ui="enabled: true"
-        renderer="colorManagement: true, physicallyCorrectLights: true"
-      >
-        <!-- CAMERA -->
-        <a-entity camera look-controls="enabled: true"></a-entity>
-
-        <!-- ASSETS -->
-        <a-assets>
-          <a-asset-item
-            id="neonPinModel"
-            src="./models/neon-pin.glb"
-          ></a-asset-item>
-        </a-assets>
-
-        <!-- 3D PIN – vedno pred kamero -->
-        <a-entity
-          id="claim-pin"
-          gltf-model="#neonPinModel"
-          position="0 -0.15 -1"
-          rotation="0 0 0"
-          scale="0.35 0.35 0.35"
-          animation__idle="property: position; dir: alternate; to: 0 0.05 -1; loop: true; dur: 1200; easing: easeInOutSine"
-          animation__claim="property: scale; from: 0.35 0.35 0.35; to: 0.8 0.8 0.8; dur: 350; easing: easeOutQuad; startEvents: claim"
-        >
-        </a-entity>
-
-        <!-- RADAR RING -->
-        <a-ring
-          id="claim-ring"
-          position="0 -0.35 -1"
-          radius-inner="0.1"
-          radius-outer="0.11"
-          material="color: #00fff2; opacity: 0.9; side: double"
-          rotation="-90 0 0"
-          animation__idle="property: rotation; to: -90 360 0; loop: true; dur: 2500; easing: linear"
-          animation__claim="property: radius-outer; from: 0.11; to: 0.5; dur: 400; easing: easeOutQuad; startEvents: claim"
-        >
-        </a-ring>
-
-        <!-- svetloba -->
-        <a-entity light="type: ambient; intensity: 0.9; color: #ffffff"></a-entity>
-        <a-entity
-          light="type: directional; intensity: 0.6"
-          position="0.5 1 1"
-        ></a-entity>
-      </a-scene>
-
-      <div class="ar-bottom">
-        <div class="ar-bottom-inner">
-          <div id="hint">
-            Tapni na neon PIN ali gumb spodaj za prevzem nagrade.
-          </div>
-          <button class="ar-claim-btn" id="btnDoClaim">Prevzemi</button>
+      <div class="overlay">
+        <div class="topbar">
+          <button class="btn" onclick="window.location.href='/'">✕ Zapri</button>
+          <span class="title" id="titleLabel">Move • AR prevzem</span>
         </div>
-      </div>
 
-      <div class="toast" id="toast"></div>
+        <div class="pin-wrapper">
+          <div class="pin" id="pin">
+            <div class="pin-ring"></div>
+          </div>
+          <div class="pin-label" id="pinLabel">Tapni za prevzem</div>
+        </div>
+
+        <div class="bottom">
+          <div class="bottom-inner">
+            <div class="hint" id="hint">
+              Tapni na neon PIN ali gumb spodaj za prevzem nagrade.
+            </div>
+            <button class="claim-btn" id="btnClaim">Prevzemi</button>
+          </div>
+        </div>
+
+        <div class="toast" id="toast"></div>
+      </div>
     </div>
 
     <script>
+      // ===== query parametri =====
       function getParam(name) {
-        const url = new URL(window.location.href);
-        return url.searchParams.get(name);
+        try {
+          const url = new URL(window.location.href);
+          return url.searchParams.get(name);
+        } catch {
+          return null;
+        }
       }
 
       const dropId = getParam("dropId") || "DEMO-DROP";
       const userId = getParam("userId") || "DEMO-USER";
       const userName = getParam("userName") || null;
 
+      const API = window.location.origin;
+
       const titleLabel = document.getElementById("titleLabel");
+      const hintEl = document.getElementById("hint");
+      const toastEl = document.getElementById("toast");
+      const pin = document.getElementById("pin");
+      const btnClaim = document.getElementById("btnClaim");
+
       if (dropId && dropId !== "DEMO-DROP") {
         titleLabel.textContent = "AR prevzem • " + dropId;
       }
 
-      const toastEl = document.getElementById("toast");
-      const hintEl = document.getElementById("hint");
-      const API = window.location.origin;
-
       function showToast(msg) {
         toastEl.textContent = msg;
         toastEl.classList.add("show");
-        setTimeout(() => toastEl.classList.remove("show"), 2000);
+        setTimeout(() => toastEl.classList.remove("show"), 1800);
       }
 
-      async function performClaim() {
-        if (performClaim._busy) return;
-        performClaim._busy = true;
+      async function startCamera() {
+        const video = document.getElementById("camera");
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: { ideal: "environment" } },
+            audio: false
+          });
+          video.srcObject = stream;
+        } catch (e) {
+          console.error("kamera", e);
+          showToast("Kamera ni na voljo");
+        }
+      }
 
-        const pin = document.getElementById("claim-pin");
-        const ring = document.getElementById("claim-ring");
+      async function doClaim() {
+        if (doClaim._busy) return;
+        doClaim._busy = true;
 
-        if (pin) pin.emit("claim");
-        if (ring) ring.emit("claim");
+        pin.style.transform = "scale(1.1)";
+        setTimeout(() => {
+          pin.style.transform = "scale(1)";
+        }, 220);
 
         showToast("Pošiljam prevzem ...");
+        hintEl.textContent = "Pošiljam prevzem na strežnik ...";
 
         try {
           const res = await fetch(API + "/api/claims", {
@@ -252,42 +313,30 @@
               window.location.href = "/";
             }, 1200);
           } else {
-            showToast("Napaka: " + (data.error || "unknown"));
+            showToast("Napaka: " + (data.error || "neznana napaka"));
             hintEl.textContent =
               "Prevzem ni uspel: " + (data.error || "neznana napaka");
-            performClaim._busy = false;
+            doClaim._busy = false;
           }
         } catch (e) {
           console.error(e);
           showToast("Napaka pri povezavi");
           hintEl.textContent = "Napaka pri povezavi s strežnikom.";
-          performClaim._busy = false;
+          doClaim._busy = false;
         }
       }
 
-      document.addEventListener("DOMContentLoaded", () => {
-        const btnClose = document.getElementById("btnClose");
-        const btnDoClaim = document.getElementById("btnDoClaim");
-        const pin = document.getElementById("claim-pin");
-
-        btnClose.addEventListener("click", (e) => {
-          e.stopPropagation();
-          window.location.href = "/";
-        });
-
-        btnDoClaim.addEventListener("click", (e) => {
-          e.stopPropagation();
-          performClaim();
-        });
-
-        // poskus za tap na sam PIN (če A-Frame dogodek dela)
-        if (pin) {
-          pin.addEventListener("click", (e) => {
-            e.stopPropagation();
-            performClaim();
-          });
-        }
+      // eventi
+      pin.addEventListener("click", (e) => {
+        e.stopPropagation();
+        doClaim();
       });
+      btnClaim.addEventListener("click", (e) => {
+        e.stopPropagation();
+        doClaim();
+      });
+
+      startCamera();
     </script>
   </body>
 </html>
