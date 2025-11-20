@@ -6,8 +6,9 @@ const cors = require('cors');
 const { createServer } = require('http');
 const { Server } = require('socket.io');
 const bcrypt = require('bcryptjs');
+const path = require('path'); // <- NOVO
 
-const VERSION = 'pg-auth-v1.1-username-fix';
+const VERSION = 'pg-auth-v1.1-username-fix-ar';
 
 // ====== MIGRACIJE (auto-run na startu, če je baza nastavljena) ======
 const MIGRATE_SQL = `
@@ -96,6 +97,9 @@ if (process.env.DATABASE_URL && Pool) {
 const app = express();
 app.use(cors({ origin: true, credentials: true }));
 app.use(express.json());
+
+// ***** STATIČNE DATOTEKE (AR HTML + modeli + markerji) *****
+app.use(express.static(path.join(__dirname, 'public')));
 
 const mem = {
   users: [],
@@ -502,6 +506,30 @@ app.post(['/api/claims', '/claims'], async (req, res) => {
   }
 });
 
+// *** AR CLAIM – posebna pot iz ar.html (brez lokacije, samo drop+user) ***
+app.post(['/api/ar-claim', '/ar-claim'], async (req, res) => {
+  try {
+    const { drop_id, user_id, user_name = null, value = 1 } = req.body || {};
+    if (!drop_id || !user_id) {
+      return res.status(400).json({ ok: false, error: 'MANJKA_drop_id_user_id' });
+    }
+
+    const claim = await createClaim({
+      drop_id,
+      user_id,
+      user_name,
+      value,
+      lat: null,
+      lng: null
+    });
+
+    io.emit('claim:created', claim);
+    res.json({ ok: true, claim });
+  } catch (e) {
+    res.status(400).json({ ok: false, error: e.message });
+  }
+});
+
 // GET /api/claims?user_id=...
 app.get(['/api/claims', '/claims'], async (req, res) => {
   const user_id = req.query.user_id;
@@ -597,5 +625,5 @@ io.on('connection', socket => {
 
 const PORT = process.env.PORT || 3000;
 httpServer.listen(PORT, () => {
-  console.log(`MoveServer (Postgres + auth) teče na :${PORT}`);
+  console.log(`MoveServer (Postgres + auth + AR) teče na :${PORT}`);
 });
