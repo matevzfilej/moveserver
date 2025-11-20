@@ -5,6 +5,9 @@
   <title>RealDropHunt Move ▸ AR prevzem</title>
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 
+  <!-- A-Frame (WebXR) -->
+  <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
+
   <style>
     html,body{
       margin:0;
@@ -16,19 +19,12 @@
       color:#fff;
     }
 
-    #cameraContainer{
-      position:fixed;
-      inset:0;
-      overflow:hidden;
-      background:#000;
-    }
-    #camera{
+    a-scene{
       width:100%;
       height:100%;
-      object-fit:cover;
-      transform:scaleX(-1); /* po želji odstrani, če nočeš mirror efekta */
     }
 
+    /* UI overlay čez AR */
     #uiTop{
       position:fixed;
       top:0;
@@ -63,44 +59,6 @@
       cursor:pointer;
     }
 
-    /* PIN, ki ni fiksno v centru, se premika z nagibom */
-    #pinWrapper{
-      position:fixed;
-      left:50%;
-      top:50%;
-      transform:translate(-50%,-50%);
-      z-index:5;
-      display:flex;
-      flex-direction:column;
-      align-items:center;
-      gap:6px;
-      cursor:pointer;
-      touch-action:manipulation;
-    }
-    #pinGlow{
-      width:80px;
-      height:80px;
-      border-radius:50%;
-      background:radial-gradient(circle at 50% 30%, rgba(255,255,255,.9), rgba(80,200,140,.4), transparent 70%);
-      filter:blur(1px);
-      animation:pulse 1.6s ease-in-out infinite alternate;
-    }
-    #pinIcon{
-      position:absolute;
-      font-size:40px;
-      text-shadow:0 0 12px rgba(0,0,0,.85);
-    }
-    #pinLabel{
-      margin-top:4px;
-      font-size:13px;
-      text-shadow:0 1px 3px rgba(0,0,0,.85);
-    }
-
-    @keyframes pulse{
-      from{transform:scale(0.85);opacity:.85;}
-      to  {transform:scale(1.05);opacity:1;}
-    }
-
     #toast{
       position:fixed;
       left:50%;
@@ -121,30 +79,57 @@
 </head>
 <body>
 
-<div id="cameraContainer">
-  <video id="camera" autoplay playsinline muted></video>
-</div>
-
 <div id="uiTop">
   <div id="leftInfo">
     <div id="userLine">Uporabnik: —</div>
     <div id="dropLine">Drop: —</div>
-    <div id="statusMsg">Poravnaj pin in tapni nanj za prevzem.</div>
+    <div id="statusMsg">Poišči 3D pin v prostoru in tapni nanj za prevzem.</div>
   </div>
   <button id="btnClose">✕ Zapri</button>
 </div>
 
-<div id="pinWrapper">
-  <div id="pinGlow"></div>
-  <div id="pinIcon">📍</div>
-  <div id="pinLabel">Tapni za prevzem</div>
-</div>
-
 <div id="toast"></div>
+
+<a-scene
+  vr-mode-ui="enabled: false"
+  renderer="colorManagement: true; physicallyCorrectLights: true; alpha: true;"
+  embedded
+  xr-mode-ui="enabled: true"
+  background="color: #000">
+
+  <a-assets>
+    <!-- 3D model pina – neon-pin.glb v isti mapi -->
+    <a-asset-item id="pinModel" src="neon-pin.glb"></a-asset-item>
+  </a-assets>
+
+  <!-- kamera z mouse cursorjem (tap) -->
+  <a-entity id="cameraRig">
+    <a-camera
+      position="0 1.6 0"
+      look-controls="enabled: true"
+      cursor="rayOrigin: mouse"
+      raycaster="objects: .clickable">
+    </a-camera>
+  </a-entity>
+
+  <!-- luči -->
+  <a-entity light="type: ambient; intensity: 0.6"></a-entity>
+  <a-entity light="type: directional; intensity: 0.9" position="0 1 1"></a-entity>
+
+  <!-- 3D PIN: 2 m pred kamero, malo plava gor/dol -->
+  <a-entity id="dropPin"
+    class="clickable"
+    gltf-model="#pinModel"
+    position="0 -0.5 -2"
+    scale="0.4 0.4 0.4"
+    animation__float="property: position; dir: alternate; dur: 1400; easing: easeInOutSine;
+                      from: 0 -0.55 -2; to: 0 -0.25 -2; loop: true">
+  </a-entity>
+
+</a-scene>
 
 <script>
   const API = 'https://moveserver.realdrophunt.com';
-  let stream = null;
 
   function getParams(){
     const u = new URL(window.location.href);
@@ -162,42 +147,17 @@
     setTimeout(()=>t.classList.remove('show'), ms);
   }
 
-  async function startCamera(){
-    const video = document.getElementById('camera');
-    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
-      showToast('Kamera ni podprta.');
-      return;
-    }
-    try{
-      stream = await navigator.mediaDevices.getUserMedia({
-        video:{ facingMode:'environment' }, audio:false
-      });
-      video.srcObject = stream;
-    }catch(e){
-      console.error('camera error', e);
-      showToast('Dostop do kamere zavrnjen.');
-    }
-  }
-
-  function stopCamera(){
-    if(stream){
-      stream.getTracks().forEach(t=>t.stop());
-      stream = null;
-    }
-  }
-
   const {dropId,userId,userName} = getParams();
   const userLine  = document.getElementById('userLine');
   const dropLine  = document.getElementById('dropLine');
   const statusMsg = document.getElementById('statusMsg');
   const btnClose  = document.getElementById('btnClose');
-  const pinWrap   = document.getElementById('pinWrapper');
+  const pin       = document.getElementById('dropPin');
 
   userLine.textContent = userName ? `Uporabnik: ${userName}` : 'Uporabnik: —';
   dropLine.textContent = dropId   ? `Drop ID: ${dropId}`     : 'Drop: —';
 
   btnClose.addEventListener('click', () => {
-    stopCamera();
     if (window.history.length > 1){
       window.history.back();
     } else {
@@ -241,7 +201,6 @@
       showToast('Drop uspešno prevzet! 🎉');
       statusMsg.textContent = 'Drop uspešno prevzet. Zapiram...';
       setTimeout(() => {
-        stopCamera();
         if (window.history.length > 1){
           window.history.back();
         } else {
@@ -255,28 +214,8 @@
     }
   }
 
-  // klik na pin → claim
-  pinWrap.addEventListener('click', claimDrop);
-
-  // "AR občutek": pin se premika z nagibom telefona
-  (function setupParallax(){
-    const maxOffset = 60; // px
-    function clamp(v, min, max){ return v < min ? min : (v > max ? max : v); }
-
-    window.addEventListener('deviceorientation', (e) => {
-      const gamma = e.gamma || 0; // levo-desno
-      const beta  = e.beta  || 0; // gor-dol
-
-      const offsetX = clamp(gamma/30 * maxOffset, -maxOffset, maxOffset);
-      const offsetY = clamp((beta-45)/30 * maxOffset, -maxOffset, maxOffset);
-
-      pinWrap.style.transform = `translate(-50%,-50%) translate(${offsetX}px, ${offsetY}px)`;
-    }, true);
-  })();
-
-  window.addEventListener('load', () => {
-    startCamera();
-  });
+  // klik na 3D pin → claim
+  pin.addEventListener('click', claimDrop);
 </script>
 </body>
 </html>
