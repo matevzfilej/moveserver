@@ -1,14 +1,14 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="sl">
   <head>
     <meta charset="UTF-8" />
-    <title>RealDropHunt Move – AR Claim</title>
+    <title>RealDropHunt Move – AR prevzem</title>
     <meta
       name="viewport"
       content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
     />
 
-    <!-- A-Frame + MindAR (WebAR) -->
+    <!-- A-Frame + MindAR samo za kamero -->
     <script src="https://aframe.io/releases/1.6.0/aframe.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-aframe.prod.js"></script>
 
@@ -104,23 +104,27 @@
     <div class="ar-overlay">
       <div class="ar-topbar">
         <!-- zapri vedno nazaj na root (index.html) -->
-        <button class="ar-btn" onclick="window.location.href='/'">✕ Close</button>
-        <span class="ar-title" id="titleLabel">MoveApp • AR Claim</span>
+        <button class="ar-btn" onclick="window.location.href='/'">✕ Zapri</button>
+        <span class="ar-title" id="titleLabel">Move • AR prevzem</span>
       </div>
 
-      <!-- AR SCENE -->
+      <!-- AR SCENE
+           MindAR tukaj samo za kamero (imageTargetSrc mora obstajat,
+           ampak markerja ne uporabljamo – pin je vedno pred kamero) -->
       <a-scene
-        mindar-image="imageTargetSrc: ./mind/targets.mind; autoStart: true; uiError: no; uiScanning: yes; uiLoading: yes;"
+        mindar-image="imageTargetSrc: ./mind/targets.mind; autoStart: true; uiError: no; uiScanning: no; uiLoading: yes;"
         embedded
         vr-mode-ui="enabled: false"
         device-orientation-permission-ui="enabled: true"
         renderer="colorManagement: true, physicallyCorrectLights: true"
       >
-        <!-- CAMERA -->
-        <a-camera
-          position="0 0 0"
-          look-controls="enabled: false"
-        ></a-camera>
+        <!-- CAMERA z cursorjem za tap na ekran -->
+        <a-entity camera look-controls="enabled: true">
+          <a-entity
+            cursor="fuse: false; rayOrigin: mouse"
+            raycaster="objects: .clickable"
+          ></a-entity>
+        </a-entity>
 
         <!-- ASSETS -->
         <a-assets>
@@ -130,37 +134,42 @@
           ></a-asset-item>
         </a-assets>
 
-        <!-- TARGET -->
-        <a-entity mindar-image-target="targetIndex: 0" id="mindar-target">
-          <!-- 3D PIN -->
-          <a-entity
-            id="claim-pin"
-            gltf-model="#neonPinModel"
-            position="0 0 0"
-            rotation="0 0 0"
-            scale="0.35 0.35 0.35"
-            animation__idle="property: position; dir: alternate; to: 0 0.15 0; loop: true; dur: 1200; easing: easeInOutSine"
-            animation__claim="property: scale; from: 0.35 0.35 0.35; to: 0.8 0.8 0.8; dur: 350; easing: easeOutQuad; startEvents: claim"
-          >
-          </a-entity>
-
-          <!-- RADAR RING -->
-          <a-ring
-            id="claim-ring"
-            position="0 -0.05 0"
-            radius-inner="0.1"
-            radius-outer="0.11"
-            material="color: #00fff2; opacity: 0.9; side: double"
-            rotation="-90 0 0"
-            animation__idle="property: rotation; to: -90 360 0; loop: true; dur: 2500; easing: linear"
-            animation__claim="property: radius-outer; from: 0.11; to: 0.5; dur: 400; easing: easeOutQuad; startEvents: claim"
-          >
-          </a-ring>
+        <!-- 3D PIN – vedno ~1m pred kamero -->
+        <a-entity
+          id="claim-pin"
+          class="clickable"
+          gltf-model="#neonPinModel"
+          position="0 -0.15 -1"
+          rotation="0 0 0"
+          scale="0.35 0.35 0.35"
+          animation__idle="property: position; dir: alternate; to: 0 0.05 -1; loop: true; dur: 1200; easing: easeInOutSine"
+          animation__claim="property: scale; from: 0.35 0.35 0.35; to: 0.8 0.8 0.8; dur: 350; easing: easeOutQuad; startEvents: claim"
+        >
         </a-entity>
+
+        <!-- RADAR RING pod pinom -->
+        <a-ring
+          id="claim-ring"
+          position="0 -0.35 -1"
+          radius-inner="0.1"
+          radius-outer="0.11"
+          material="color: #00fff2; opacity: 0.9; side: double"
+          rotation="-90 0 0"
+          animation__idle="property: rotation; to: -90 360 0; loop: true; dur: 2500; easing: linear"
+          animation__claim="property: radius-outer; from: 0.11; to: 0.5; dur: 400; easing: easeOutQuad; startEvents: claim"
+        >
+        </a-ring>
+
+        <!-- malo svetlobe -->
+        <a-entity light="type: ambient; intensity: 0.9; color: #ffffff"></a-entity>
+        <a-entity
+          light="type: directional; intensity: 0.6"
+          position="0.5 1 1"
+        ></a-entity>
       </a-scene>
 
       <div class="ar-bottom" id="hint">
-        Usmeri kamero v marker in tapni na PIN, da claimaš nagrado.
+        Tapni na neon PIN, da prevzameš nagrado.
       </div>
 
       <div class="toast" id="toast"></div>
@@ -179,27 +188,29 @@
 
       const titleLabel = document.getElementById('titleLabel');
       if (dropId && dropId !== 'DEMO-DROP') {
-        titleLabel.textContent = 'AR Claim • ' + dropId;
+        titleLabel.textContent = 'AR prevzem • ' + dropId;
       }
 
       const toastEl = document.getElementById('toast');
+      const hintEl = document.getElementById('hint');
+
       function showToast(msg) {
         toastEl.textContent = msg;
         toastEl.classList.add('show');
         setTimeout(() => toastEl.classList.remove('show'), 2000);
       }
 
+      const API = window.location.origin; // isti strežnik kot index.html
+
       document.addEventListener('DOMContentLoaded', () => {
-        const target = document.querySelector('#mindar-target');
         const pin = document.querySelector('#claim-pin');
         const ring = document.querySelector('#claim-ring');
-        const hint = document.getElementById('hint');
 
-        if (!target || !pin) return;
+        if (!pin) return;
 
         let claimed = false;
 
-        target.addEventListener('click', async () => {
+        pin.addEventListener('click', async () => {
           if (claimed) return;
           claimed = true;
 
@@ -210,13 +221,16 @@
           showToast('Pošiljam prevzem ...');
 
           try {
-            const res = await fetch('/api/ar-claim', {
+            const res = await fetch(API + '/api/claims', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
                 drop_id: dropId,
                 user_id: userId,
                 user_name: userName,
+                // za demo pošljemo brez lat/lng (backend razdalje ne bo preverjal)
+                lat: null,
+                lng: null,
                 value: 1
               })
             });
@@ -225,15 +239,17 @@
 
             if (data.ok) {
               showToast('✅ Nagrada uspešno prevzeta');
-              hint.textContent = 'Prevzem je uspel. Lahko zapreš AR pogled.';
+              hintEl.textContent =
+                'Prevzem je uspel. Lahko zapreš AR pogled z gumbom zgoraj.';
             } else {
               showToast('Napaka: ' + (data.error || 'unknown'));
-              hint.textContent = 'Prevzem ni uspel: ' + (data.error || '');
+              hintEl.textContent =
+                'Prevzem ni uspel: ' + (data.error || 'neznana napaka');
             }
           } catch (e) {
             console.error(e);
             showToast('Napaka pri povezavi');
-            hint.textContent = 'Napaka pri povezavi s strežnikom.';
+            hintEl.textContent = 'Napaka pri povezavi s strežnikom.';
           }
         });
       });
