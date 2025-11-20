@@ -24,7 +24,6 @@
       height:100%;
     }
 
-    /* UI overlay čez AR */
     #uiTop{
       position:fixed;
       top:0;
@@ -94,7 +93,8 @@
   vr-mode-ui="enabled: false"
   renderer="colorManagement: true; physicallyCorrectLights: true; alpha: true;"
   embedded
-  xr-mode-ui="enabled: true"
+  webxr="mode: ar; overlayElement: #uiTop;"
+  device-orientation-permission-ui="enabled: true"
   background="color: #000">
 
   <a-assets>
@@ -131,7 +131,6 @@
 <script>
   const API = 'https://moveserver.realdrophunt.com';
 
-  // ----- URL parametri (dropId, userId, userName) -----
   function getParams(){
     const u = new URL(window.location.href);
     return {
