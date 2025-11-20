@@ -8,7 +8,6 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&family=Orbitron:wght@600&display=swap" rel="stylesheet">
   <style>
     :root{
-      /* pastelna tema – mockup stil */
       --bg:#d8f0df;
       --shell:#f5fff7;
       --header:#e0f3e4;
@@ -34,48 +33,31 @@
       min-height:100vh;
     }
 
-    /* ---- PHONE SHELL (da izgleda kot app v telefonu) ---- */
+    /* PHONE SHELL – vedno 100vh, da se nav ne odreže */
     .phone-shell{
       width:100%;
       max-width:420px;
-      margin:8px auto;
+      margin:0;
       background:var(--shell);
-      border-radius:32px;
-      box-shadow:0 18px 60px rgba(0,0,0,.25);
+      border-radius:0;
+      box-shadow:none;
       display:flex;
       flex-direction:column;
-      min-height:calc(100vh - 16px);
+      height:100vh;
       position:relative;
       overflow:hidden;
     }
 
-    /* manjši ekrani (mobilni) */
-    @media (max-width:600px){
-      body{
-        align-items:stretch;
-      }
+    @media (min-width:900px){
+      body{padding:20px 0}
       .phone-shell{
-        margin:0;
-        max-width:100%;
-        min-height:100vh;
-        border-radius:0;
-        box-shadow:none;
-        overflow:hidden;
-        padding-bottom:64px; /* prostor za nav */
-      }
-      nav.bottomnav{
-        position:fixed;
-        left:0;
-        right:0;
-        bottom:0;
-        height:64px;
-      }
-      #panel{
-        bottom:86px; /* nad fixed nav */
+        margin:0 auto;
+        border-radius:32px;
+        box-shadow:0 18px 60px rgba(0,0,0,.25);
       }
     }
 
-    /* zgornji header */
+    /* HEADER */
     header{
       background:var(--header);
       padding:10px 14px 8px 14px;
@@ -109,7 +91,7 @@
       white-space:nowrap;
     }
 
-    /* glavni pogled (mapa + paneli) */
+    /* MAIN VIEW */
     #view{
       flex:1;
       position:relative;
@@ -123,7 +105,7 @@
       display:none;
       height:100%;
       overflow:auto;
-      padding:10px 10px 76px 10px; /* spodaj prostor za nav */
+      padding:10px 10px 76px 10px; /* prostor za nav */
     }
 
     .card{
@@ -147,12 +129,12 @@
 
     .muted{color:var(--muted);font-size:12px}
 
-    /* spodnji claim panel nad mapo */
+    /* PANEL nad mapo */
     #panel{
       position:absolute;
       left:14px;
       right:14px;
-      bottom:80px; /* nad navigacijo */
+      bottom:72px; /* malo manj, da je nav viden */
       background:rgba(245,255,247,.98);
       border-radius:20px;
       border:1px solid var(--line);
@@ -200,11 +182,11 @@
       cursor:default;
     }
 
-    /* spodnja navigacija */
+    /* BOTTOM NAV – vedno znotraj ekrana */
     nav.bottomnav{
       position:absolute;
       left:0;right:0;bottom:0;
-      height:64px;
+      height:60px;
       background:var(--nav);
       border-top:1px solid var(--line);
       display:flex;
@@ -276,11 +258,6 @@
       margin-top:6px;
       font-size:13px;
       color:var(--danger);
-    }
-
-    @media (min-width:900px){
-      body{padding:20px 0}
-      .phone-shell{margin:0 auto}
     }
   </style>
 </head>
@@ -369,7 +346,6 @@
   <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script>
-    // API = isti origin kot index.html (Render, lokalno, karkoli)
     const API = window.location.origin;
 
     // ===== AUTH =====
@@ -579,7 +555,7 @@
       if(id) window._tryClaim(id);
     };
 
-    // AR CLAIM GUMB – odpre ar.html z dropId, userId, userName
+    // AR GUMB – odpre ar.html z dropId, userId, userName
     btnClaimAR.onclick = () => {
       const id = btnClaimAR.dataset.drop;
       if (!id) return;
@@ -671,7 +647,7 @@
       }
     };
 
-    // DEMO: če ni nobenega dropa, ustvari enega na tvoji lokaciji
+    // DEMO DROP pri tvoji lokaciji, če ni nič
     async function ensureDemoDropNearMe(){
       try{
         const list = await (await fetch(API+'/api/drops?status=active')).json();
@@ -706,14 +682,14 @@
           myMarker.setLatLng(myPos);
           map.setView([myPos.lat,myPos.lng],16);
           uiNearest();
-          ensureDemoDropNearMe(); // ustvari demo drop, če ga še ni
+          ensureDemoDropNearMe();
         },
         err=>alert('Napaka lokacije: '+err.message),
         {enableHighAccuracy:true,timeout:10000,maximumAge:8000}
       );
     }
 
-    // dodamo gumba v header (Lokacija / Osveži)
+    // header gumbi
     const headerRight = document.querySelector('.top-row > div:last-child');
     const btnLoc=document.createElement('button');
     btnLoc.textContent='Lokacija';
