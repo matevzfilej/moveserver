@@ -150,4 +150,92 @@
             radius-inner="0.1"
             radius-outer="0.11"
             material="color: #00fff2; opacity: 0.9; side: double"
-            rotation="-90 0
+            rotation="-90 0 0"
+            animation__idle="property: rotation; to: -90 360 0; loop: true; dur: 2500; easing: linear"
+            animation__claim="property: radius-outer; from: 0.11; to: 0.5; dur: 400; easing: easeOutQuad; startEvents: claim"
+          >
+          </a-ring>
+        </a-entity>
+      </a-scene>
+
+      <div class="ar-bottom" id="hint">
+        Usmeri kamero v marker in tapni na PIN, da claimaš nagrado.
+      </div>
+
+      <div class="toast" id="toast"></div>
+    </div>
+
+    <script>
+      // ===== helper za query parametre =====
+      function getParam(name) {
+        const url = new URL(window.location.href);
+        return url.searchParams.get(name);
+      }
+
+      const dropId = getParam('dropId') || 'DEMO-DROP';
+      const userId = getParam('userId') || 'DEMO-USER';
+      const userName = getParam('userName') || null;
+
+      const titleLabel = document.getElementById('titleLabel');
+      if (dropId && dropId !== 'DEMO-DROP') {
+        titleLabel.textContent = 'AR Claim • ' + dropId;
+      }
+
+      const toastEl = document.getElementById('toast');
+      function showToast(msg) {
+        toastEl.textContent = msg;
+        toastEl.classList.add('show');
+        setTimeout(() => toastEl.classList.remove('show'), 2000);
+      }
+
+      document.addEventListener('DOMContentLoaded', () => {
+        const target = document.querySelector('#mindar-target');
+        const pin = document.querySelector('#claim-pin');
+        const ring = document.querySelector('#claim-ring');
+        const hint = document.getElementById('hint');
+
+        if (!target || !pin) return;
+
+        let claimed = false;
+
+        target.addEventListener('click', async () => {
+          if (claimed) return;
+          claimed = true;
+
+          // AR ANIMACIJA
+          pin.emit('claim');
+          if (ring) ring.emit('claim');
+
+          showToast('Pošiljam prevzem ...');
+
+          try {
+            const res = await fetch('/api/ar-claim', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                drop_id: dropId,
+                user_id: userId,
+                user_name: userName,
+                value: 1
+              })
+            });
+
+            const data = await res.json();
+
+            if (data.ok) {
+              showToast('✅ Nagrada uspešno prevzeta');
+              hint.textContent = 'Prevzem je uspel. Lahko zapreš AR pogled.';
+            } else {
+              showToast('Napaka: ' + (data.error || 'unknown'));
+              hint.textContent = 'Prevzem ni uspel: ' + (data.error || '');
+            }
+          } catch (e) {
+            console.error(e);
+            showToast('Napaka pri povezavi');
+            hint.textContent = 'Napaka pri povezavi s strežnikom.';
+          }
+        });
+      });
+    </script>
+  </body>
+</html>
