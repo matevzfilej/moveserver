@@ -31,6 +31,7 @@
       display:flex;
       justify-content:center;
       align-items:stretch;
+      min-height:100vh;
     }
 
     /* ---- PHONE SHELL (da izgleda kot app v telefonu) ---- */
@@ -41,11 +42,26 @@
       background:var(--shell);
       border-radius:32px;
       box-shadow:0 18px 60px rgba(0,0,0,.25);
-      overflow:hidden;
       display:flex;
       flex-direction:column;
       min-height:calc(100vh - 16px);
       position:relative;
+      overflow:hidden;
+    }
+
+    /* manjši ekrani (mobilni) – naj se raztegne, brez cut-off spodaj */
+    @media (max-width:600px){
+      body{
+        align-items:stretch;
+      }
+      .phone-shell{
+        margin:0;
+        max-width:100%;
+        min-height:100vh;
+        border-radius:0;
+        box-shadow:none;
+        overflow:auto; /* omogoči scroll, če je vsebina višja */
+      }
     }
 
     /* zgornji header */
@@ -314,9 +330,12 @@
           </div>
           <div class="badge" id="distanceBadge" style="display:none"></div>
         </div>
-        <div style="margin-top:6px;display:flex;justify-content:space-between;align-items:center;gap:10px">
-          <div class="muted" id="claimHint">Premakni se bližje dropu za prevzem.</div>
-          <button class="btn-primary" id="btnClaim" disabled>Prevzemi</button>
+        <div style="margin-top:6px;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+          <div class="muted" id="claimHint" style="flex:1 1 auto">Premakni se bližje dropu za prevzem.</div>
+          <div style="display:flex;gap:6px;flex-shrink:0">
+            <button class="btn-primary" id="btnClaim" disabled>Prevzemi</button>
+            <button class="btn-primary" id="btnClaimAR" disabled>AR</button>
+          </div>
         </div>
       </div>
 
@@ -504,10 +523,13 @@
       const n=nearestDrop(); if(!n)return null;
       return (n.drop.radius_m!=null && n.dist<=n.drop.radius_m)?n:null;
     }
+
+    const btnClaim   = document.getElementById('btnClaim');
+    const btnClaimAR = document.getElementById('btnClaimAR');
+
     function uiNearest(){
       const nAll=nearestDrop(),nIn=nearestInside();
       const near       = document.getElementById('near');
-      const btn        = document.getElementById('btnClaim');
       const badge      = document.getElementById('distanceBadge');
       const hint       = document.getElementById('claimHint');
 
@@ -522,18 +544,40 @@
       }
 
       if(nIn){
-        btn.disabled=false;
-        btn.dataset.drop=nIn.drop.id;
+        btnClaim.disabled=false;
+        btnClaim.dataset.drop=nIn.drop.id;
+
+        btnClaimAR.disabled=false;
+        btnClaimAR.dataset.drop=nIn.drop.id;
+
         hint.textContent='Si v dosegu – prevzem je na voljo.';
       }else{
-        btn.disabled=true;
-        btn.removeAttribute('data-drop');
+        btnClaim.disabled=true;
+        btnClaim.removeAttribute('data-drop');
+
+        btnClaimAR.disabled=true;
+        btnClaimAR.removeAttribute('data-drop');
+
         hint.textContent='Premakni se bližje dropu za prevzem.';
       }
     }
-    document.getElementById('btnClaim').onclick=()=>{
-      const id=document.getElementById('btnClaim').dataset.drop;
+
+    btnClaim.onclick=()=>{
+      const id=btnClaim.dataset.drop;
       if(id) window._tryClaim(id);
+    };
+
+    // AR CLAIM GUMB – odpre ar.html z dropId, userId, userName
+    btnClaimAR.onclick = () => {
+      const id = btnClaimAR.dataset.drop;
+      if (!id) return;
+      if (!currentUser) {
+        alert('Najprej se prijavi.');
+        return;
+      }
+
+      const url = `${API}/ar.html?dropId=${encodeURIComponent(id)}&userId=${encodeURIComponent(currentUser.id)}&userName=${encodeURIComponent(currentUser.username)}`;
+      window.location.href = url;
     };
 
     async function naloziDropse(){
@@ -548,7 +592,7 @@
           const div=document.createElement('div');div.className='card';
           div.innerHTML=`<b>${d.title}</b> <span class="badge">r=${d.radius_m}m</span>
             <div class="muted" style="margin-top:4px">prevzemi: ${d.claimed_count||0}</div>
-            <div style="margin-top:8px;display:flex;gap:8px">
+            <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">
               <button class="btn-ghost go">Centriraj</button>
               <button class="btn-primary claim" style="padding:8px 16px">Prevzemi</button>
             </div>`;
