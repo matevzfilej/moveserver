@@ -29,7 +29,8 @@
       width:100%;
       height:100%;
       object-fit:cover;
-      transform:scaleX(-1); /* rahlo bolj “selfie” feeling – odstrani, če ti ni všeč */
+      /* če želiš brez “selfie” efekta, odstrani naslednjo vrstico */
+      transform:scaleX(-1);
     }
 
     /* Top bar (user, drop, zapri) */
@@ -67,7 +68,7 @@
       cursor:pointer;
     }
 
-    /* Pin na sredini (malo nižje) */
+    /* PIN – neon lokacijski marker na sredini (malo nižje) */
     #pinWrap{
       position:fixed;
       left:50%;
@@ -81,26 +82,74 @@
     }
 
     #pinBtn{
-      width:80px;
-      height:80px;
-      border-radius:50%;
+      width:82px;
+      height:82px;
       border:none;
+      padding:0;
+      border-radius:50%;
       cursor:pointer;
-      background:radial-gradient(circle at 30% 20%, #ffe7e7 0, #ff8e8e 30%, #e03131 70%, #900000 100%);
-      box-shadow:0 8px 25px rgba(0,0,0,.6);
+      background:transparent;
       position:relative;
       animation:float 1.3s ease-in-out infinite alternate;
     }
+
+    /* zunanja “neon” glava pina */
+    #pinBtn::before{
+      content:"";
+      position:absolute;
+      inset:6px 10px;
+      border-radius:50% 50% 50% 50%;
+      background:radial-gradient(circle at 30% 20%,
+        #f5fff7 0,
+        #9af2bf 20%,
+        #3fb16d 55%,
+        #14663a 100%);
+      box-shadow:
+        0 0 8px rgba(74, 210, 140,.9),
+        0 0 18px rgba(74, 210, 140,.7),
+        0 14px 28px rgba(0,0,0,.55);
+    }
+
+    /* notranji “luknja” / highlight */
     #pinBtn::after{
-      content:'';
+      content:"";
       position:absolute;
       left:50%;
-      bottom:-12px;
+      top:32%;
+      transform:translate(-50%,-50%);
+      width:28px;
+      height:28px;
+      border-radius:999px;
+      background:radial-gradient(circle at 30% 20%,
+        rgba(245,255,247,0.95),
+        rgba(245,255,247,0) 65%);
+      box-shadow:0 0 12px rgba(245,255,247,.7);
+      mix-blend-mode:screen;
+    }
+
+    /* spodnji “rep” pina */
+    #pinTail{
+      position:absolute;
+      left:50%;
+      bottom:6px;
+      transform:translateX(-50%) rotate(45deg);
+      width:22px;
+      height:22px;
+      border-radius:4px;
+      background:linear-gradient(135deg,#2b8a5f,#0f4226);
+      box-shadow:0 6px 14px rgba(0,0,0,.6);
+    }
+
+    /* senca pod pinom */
+    #pinShadow{
+      position:absolute;
+      left:50%;
+      bottom:-14px;
       transform:translateX(-50%);
-      width:40px;
+      width:44px;
       height:16px;
       border-radius:50%;
-      background:radial-gradient(circle, rgba(0,0,0,.3), transparent 70%);
+      background:radial-gradient(circle, rgba(0,0,0,.45), transparent 70%);
       filter:blur(3px);
     }
 
@@ -111,6 +160,7 @@
       background:rgba(0,0,0,.6);
       border:1px solid rgba(255,255,255,.3);
       text-shadow:0 1px 2px rgba(0,0,0,.9);
+      backdrop-filter:blur(4px);
     }
 
     @keyframes float{
@@ -153,7 +203,10 @@
 </div>
 
 <div id="pinWrap">
-  <button id="pinBtn" aria-label="Prevzemi drop"></button>
+  <button id="pinBtn" aria-label="Prevzemi drop">
+    <div id="pinTail"></div>
+    <div id="pinShadow"></div>
+  </button>
   <div id="pinLabel">Tapni za prevzem</div>
 </div>
 
@@ -268,7 +321,7 @@
 
   pinBtn.addEventListener('click', claimDrop);
 
-  // start
+  // start kamere
   startCamera();
 </script>
 </body>
