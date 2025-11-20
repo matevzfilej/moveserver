@@ -1,1 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>RealDropHunt Move – AR Claim</title>
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
+    />
 
+    <!-- A-Frame + MindAR (WebAR) -->
+    <script src="https://aframe.io/releases/1.6.0/aframe.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-aframe.prod.js"></script>
+
+    <style>
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        height: 100%;
+        overflow: hidden;
+        background: #000;
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+          sans-serif;
+        color: #f5f7ff;
+      }
+
+      .ar-overlay {
+        position: fixed;
+        inset: 0;
+        z-index: 1;
+        display: flex;
+        flex-direction: column;
+      }
+
+      a-scene {
+        width: 100%;
+        height: 100%;
+      }
+
+      .ar-topbar {
+        position: absolute;
+        top: 8px;
+        left: 0;
+        right: 0;
+        z-index: 10;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 8px 12px;
+        pointer-events: none;
+      }
+
+      .ar-btn {
+        pointer-events: auto;
+        border: none;
+        border-radius: 999px;
+        padding: 6px 12px;
+        font-size: 13px;
+        background: rgba(10, 10, 10, 0.8);
+        color: #f5f7ff;
+        backdrop-filter: blur(10px);
+        cursor: pointer;
+      }
+
+      .ar-title {
+        font-size: 14px;
+        opacity: 0.85;
+      }
+
+      .ar-bottom {
+        position: absolute;
+        bottom: 10px;
+        left: 0;
+        right: 0;
+        text-align: center;
+        padding: 6px 12px;
+        font-size: 13px;
+        opacity: 0.9;
+        pointer-events: none;
+      }
+
+      .toast {
+        position: absolute;
+        left: 50%;
+        bottom: 80px;
+        transform: translateX(-50%);
+        background: rgba(10, 10, 10, 0.8);
+        color: #f5f7ff;
+        padding: 8px 12px;
+        border-radius: 999px;
+        font-size: 13px;
+        opacity: 0;
+        transition: opacity 0.25s ease-out;
+        pointer-events: none;
+      }
+
+      .toast.show {
+        opacity: 1;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="ar-overlay">
+      <div class="ar-topbar">
+        <button class="ar-btn" onclick="history.back()">✕ Close</button>
+        <span class="ar-title" id="titleLabel">MoveApp • AR Claim</span>
+      </div>
+
+      <!-- AR SCENE -->
+      <a-scene
+        mindar-image="imageTargetSrc: ./mind/targets.mind; autoStart: true; uiError: no; uiScanning: yes; uiLoading: yes;"
+        embedded
+        vr-mode-ui="enabled: false"
+        device-orientation-permission-ui="enabled: true"
+        renderer="colorManagement: true, physicallyCorrectLights: true"
+      >
+        <!-- CAMERA -->
+        <a-camera
+          position="0 0 0"
+          look-controls="enabled: false"
+        ></a-camera>
+
+        <!-- ASSETS -->
+        <a-assets>
+          <a-asset-item
+            id="neonPinModel"
+            src="./models/neon-pin.glb"
+          ></a-asset-item>
+        </a-assets>
+
+        <!-- TARGET -->
+        <a-entity mindar-image-target="targetIndex: 0" id="mindar-target">
+          <!-- 3D PIN -->
+          <a-entity
+            id="claim-pin"
+            gltf-model="#neonPinModel"
+            position="0 0 0"
+            rotation="0 0 0"
+            scale="0.35 0.35 0.35"
+            animation__idle="property: position; dir: alternate; to: 0 0.15 0; loop: true; dur: 1200; easing: easeInOutSine"
+            animation__claim="property: scale; from: 0.35 0.35 0.35; to: 0.8 0.8 0.8; dur: 350; easing: easeOutQuad; startEvents: claim"
+          >
+          </a-entity>
+
+          <!-- RADAR RING -->
+          <a-ring
+            id="claim-ring"
+            position="0 -0.05 0"
+            radius-inner="0.1"
+            radius-outer="0.11"
+            material="color: #00fff2; opacity: 0.9; side: double"
+            rotation="-90 0
