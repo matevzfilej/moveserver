@@ -1,0 +1,669 @@
+<!doctype html>
+<html lang="sl">
+<head>
+  <meta charset="utf-8" />
+  <title>Real Drop Hunt Move ▸ Move App</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&family=Orbitron:wght@600&display=swap" rel="stylesheet">
+  <style>
+    :root{
+      /* pastelna tema – mockup stil */
+      --bg:#d8f0df;
+      --shell:#f5fff7;
+      --header:#e0f3e4;
+      --nav:#e0f3e4;
+      --card:#ffffff;
+      --line:#bfd9c6;
+      --ink:#20402b;
+      --muted:#6b8b74;
+      --accent:#4ea66c;
+      --accent-soft:#bde8c8;
+      --danger:#e56b6b;
+    }
+
+    *{box-sizing:border-box;margin:0;padding:0}
+    html,body{height:100%}
+    body{
+      font-family:Inter,system-ui,Arial,sans-serif;
+      background:var(--bg);
+      color:var(--ink);
+      display:flex;
+      justify-content:center;
+      align-items:stretch;
+    }
+
+    /* ---- PHONE SHELL (da izgleda kot app v telefonu) ---- */
+    .phone-shell{
+      width:100%;
+      max-width:420px;
+      margin:8px auto;
+      background:var(--shell);
+      border-radius:32px;
+      box-shadow:0 18px 60px rgba(0,0,0,.25);
+      overflow:hidden;
+      display:flex;
+      flex-direction:column;
+      min-height:calc(100vh - 16px);
+      position:relative;
+    }
+
+    /* zgornji header */
+    header{
+      background:var(--header);
+      padding:10px 14px 8px 14px;
+      border-bottom:1px solid var(--line);
+      display:flex;
+      flex-direction:column;
+      gap:4px;
+    }
+    header .top-row{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:8px;
+    }
+    h1{
+      font-family:Orbitron,Inter;
+      font-size:19px;
+      line-height:1.1;
+    }
+    .subtitle{
+      font-size:11px;
+      color:var(--muted);
+      margin-top:2px;
+    }
+    .pill{
+      padding:4px 10px;
+      border-radius:999px;
+      border:1px solid var(--line);
+      background:#f0fbf3;
+      font-size:11px;
+      white-space:nowrap;
+    }
+
+    /* glavni pogled (mapa + paneli) */
+    #view{
+      flex:1;
+      position:relative;
+      overflow:hidden;
+    }
+    #map{
+      height:100%;
+      width:100%;
+    }
+    #list,#rewards{
+      display:none;
+      height:100%;
+      overflow:auto;
+      padding:10px 10px 76px 10px; /* spodaj prostor za nav */
+    }
+
+    .card{
+      background:var(--card);
+      border-radius:18px;
+      border:1px solid var(--line);
+      padding:12px 14px;
+      margin-bottom:10px;
+      box-shadow:0 8px 20px rgba(0,0,0,.05);
+    }
+    .badge{
+      display:inline-flex;
+      align-items:center;
+      padding:2px 8px;
+      border-radius:999px;
+      border:1px solid var(--line);
+      background:#f3faf5;
+      font-size:11px;
+      color:var(--muted);
+    }
+
+    .muted{color:var(--muted);font-size:12px}
+
+    /* spodnji claim panel nad mapo */
+    #panel{
+      position:absolute;
+      left:14px;
+      right:14px;
+      bottom:80px; /* nad navigacijo */
+      background:rgba(245,255,247,.98);
+      border-radius:20px;
+      border:1px solid var(--line);
+      padding:10px 14px;
+      display:flex;
+      flex-direction:column;
+      gap:4px;
+      box-shadow:0 10px 30px rgba(0,0,0,.25);
+      z-index:500;
+    }
+    #panel-row{
+      display:flex;
+      align-items:center;
+      gap:8px;
+    }
+    #near{font-weight:600;font-size:14px}
+    #distanceBadge{margin-left:auto}
+
+    button{
+      border-radius:999px;
+      border:1px solid var(--line);
+      padding:8px 14px;
+      cursor:pointer;
+      background:#eef8f1;
+      color:var(--ink);
+      font-size:13px;
+      font-weight:500;
+    }
+    .btn-primary{
+      background:var(--accent);
+      border-color:var(--accent);
+      color:#f9fff9;
+      font-weight:600;
+      padding:10px 22px;
+      font-size:15px;
+    }
+    .btn-ghost{
+      background:transparent;
+      border-color:transparent;
+      color:var(--muted);
+      padding-inline:0;
+    }
+    button:disabled{
+      opacity:.55;
+      cursor:default;
+    }
+
+    /* spodnja navigacija */
+    nav.bottomnav{
+      position:absolute;
+      left:0;right:0;bottom:0;
+      height:64px;
+      background:var(--nav);
+      border-top:1px solid var(--line);
+      display:flex;
+      justify-content:space-around;
+      align-items:center;
+      padding-bottom:env(safe-area-inset-bottom);
+      z-index:600;
+    }
+    .bn-btn{
+      display:flex;
+      flex-direction:column;
+      align-items:center;
+      gap:3px;
+      font-size:11px;
+      color:var(--muted);
+      min-width:60px;
+    }
+    .bn-btn span.icon{
+      font-size:16px;
+    }
+    .bn-btn.active{
+      color:var(--accent);
+      font-weight:600;
+    }
+
+    /* AUTH OVERLAY */
+    #authOverlay{
+      position:fixed;
+      inset:0;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      background:rgba(0,0,0,.55);
+      z-index:2000;
+    }
+    #authCard{
+      width:100%;
+      max-width:360px;
+      margin:0 18px;
+      background:var(--shell);
+      border-radius:24px;
+      border:1px solid var(--line);
+      padding:18px 18px 16px;
+      box-shadow:0 18px 40px rgba(0,0,0,.45);
+    }
+    #authCard h2{
+      font-family:Orbitron,Inter;
+      font-size:20px;
+      margin-bottom:4px;
+    }
+    #authCard p{margin-bottom:10px}
+    #authCard input{
+      width:100%;
+      margin-bottom:8px;
+      border-radius:999px;
+      border:1px solid var(--line);
+      padding:9px 12px;
+      background:#f0faf3;
+      font-size:14px;
+    }
+    #authFooter{
+      margin-top:8px;
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      font-size:13px;
+    }
+    #authError{
+      margin-top:6px;
+      font-size:13px;
+      color:var(--danger);
+    }
+
+    @media (min-width:900px){
+      body{padding:20px 0}
+      .phone-shell{margin:0 auto}
+    }
+  </style>
+</head>
+<body>
+  <!-- AUTH -->
+  <div id="authOverlay">
+    <div id="authCard">
+      <h2>RealDropHunt Move</h2>
+      <p id="authTitle" class="muted">Ustvari račun</p>
+
+      <div id="regFields">
+        <input id="regUser" placeholder="Uporabniško ime">
+        <input id="regPass" type="password" placeholder="Geslo">
+        <button class="btn-primary" style="width:100%;margin-top:4px" id="btnDoRegister">Registracija</button>
+      </div>
+
+      <div id="loginFields" style="display:none">
+        <input id="logUser" placeholder="Uporabniško ime">
+        <input id="logPass" type="password" placeholder="Geslo">
+        <button class="btn-primary" style="width:100%;margin-top:4px" id="btnDoLogin">Prijava</button>
+      </div>
+
+      <div id="authFooter">
+        <span id="swapText">Že imaš račun?</span>
+        <button id="btnSwap" class="btn-ghost">Prijava</button>
+      </div>
+      <div id="authError"></div>
+    </div>
+  </div>
+
+  <!-- PHONE SHELL -->
+  <div class="phone-shell">
+    <!-- HEADER -->
+    <header>
+      <div class="top-row">
+        <div>
+          <h1>Real Drop</h1>
+          <div class="subtitle">Hunt Move</div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:4px;align-items:flex-end">
+          <div class="pill" id="status">Povezovanje…</div>
+          <div class="pill" id="userBadge">Uporabnik: —</div>
+        </div>
+      </div>
+    </header>
+
+    <!-- MAIN VIEW -->
+    <div id="view">
+      <div id="map"></div>
+      <div id="list"></div>
+      <div id="rewards"></div>
+
+      <div id="panel">
+        <div id="panel-row">
+          <div>
+            <div class="muted">Najbližji v dosegu:</div>
+            <div id="near">—</div>
+          </div>
+          <div class="badge" id="distanceBadge" style="display:none"></div>
+        </div>
+        <div style="margin-top:6px;display:flex;justify-content:space-between;align-items:center;gap:10px">
+          <div class="muted" id="claimHint">Premakni se bližje dropu za prevzem.</div>
+          <button class="btn-primary" id="btnClaim" disabled>Prevzemi</button>
+        </div>
+      </div>
+
+      <!-- BOTTOM NAV -->
+      <nav class="bottomnav">
+        <div class="bn-btn active" data-tab="map">
+          <span class="icon">🗺️</span><span>Zemljevid</span>
+        </div>
+        <div class="bn-btn" data-tab="list">
+          <span class="icon">📍</span><span>Dropi</span>
+        </div>
+        <div class="bn-btn" data-tab="rewards">
+          <span class="icon">🏆</span><span>Nagrade</span>
+        </div>
+      </nav>
+    </div>
+  </div>
+
+  <!-- SCRIPTS -->
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script>
+    const API = 'https://moveserver.realdrophunt.com';
+
+    // ===== AUTH =====
+    const authOverlay = document.getElementById('authOverlay');
+    const regFields   = document.getElementById('regFields');
+    const loginFields = document.getElementById('loginFields');
+    const authTitle   = document.getElementById('authTitle');
+    const swapBtn     = document.getElementById('btnSwap');
+    const swapText    = document.getElementById('swapText');
+    const authError   = document.getElementById('authError');
+    const userBadge   = document.getElementById('userBadge');
+
+    let authMode   = 'register';
+    let currentUser = null;
+
+    function setMode(mode){
+      authMode = mode;
+      authError.textContent = '';
+      if(mode === 'register'){
+        regFields.style.display = 'block';
+        loginFields.style.display = 'none';
+        authTitle.textContent = 'Ustvari račun';
+        swapText.textContent = 'Že imaš račun?';
+        swapBtn.textContent = 'Prijava';
+      }else{
+        regFields.style.display = 'none';
+        loginFields.style.display = 'block';
+        authTitle.textContent = 'Prijava';
+        swapText.textContent = 'Še nimaš računa?';
+        swapBtn.textContent = 'Registracija';
+      }
+    }
+    swapBtn.onclick = () => setMode(authMode === 'register' ? 'login' : 'register');
+
+    async function doRegister(){
+      authError.textContent = '';
+      const username = document.getElementById('regUser').value.trim();
+      const password = document.getElementById('regPass').value;
+      if(!username || !password){
+        authError.textContent = 'Izpolni uporabniško ime in geslo.';
+        return;
+      }
+      try{
+        const r = await fetch(API+'/api/register',{
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({ username,password })
+        });
+        const data = await r.json();
+        if(!data.ok){ authError.textContent = 'Napaka: '+data.error; return; }
+        currentUser = data.user;
+        localStorage.setItem('moveUser',JSON.stringify(currentUser));
+        authOverlay.style.display='none';
+        initAfterLogin();
+      }catch(e){
+        authError.textContent = 'Napaka strežnika.';
+      }
+    }
+    document.getElementById('btnDoRegister').onclick = doRegister;
+
+    async function doLogin(){
+      authError.textContent = '';
+      const username = document.getElementById('logUser').value.trim();
+      const password = document.getElementById('logPass').value;
+      if(!username || !password){
+        authError.textContent = 'Vnesi uporabniško ime in geslo.';
+        return;
+      }
+      try{
+        const r = await fetch(API+'/api/login',{
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({ username,password })
+        });
+        const data = await r.json();
+        if(!data.ok){ authError.textContent='Napaka: '+data.error; return; }
+        currentUser = data.user;
+        localStorage.setItem('moveUser',JSON.stringify(currentUser));
+        authOverlay.style.display='none';
+        initAfterLogin();
+      }catch(e){
+        authError.textContent = 'Napaka strežnika.';
+      }
+    }
+    document.getElementById('btnDoLogin').onclick = doLogin;
+
+    const stored = localStorage.getItem('moveUser');
+    if(stored){
+      try{
+        currentUser = JSON.parse(stored);
+        authOverlay.style.display='none';
+      }catch{}
+    }else{
+      setMode('register');
+    }
+
+    // ===== TABS =====
+    const tabs = {
+      map: document.getElementById('map'),
+      list: document.getElementById('list'),
+      rewards: document.getElementById('rewards')
+    };
+    document.querySelectorAll('.bn-btn').forEach(btn=>{
+      btn.onclick = () =>{
+        document.querySelectorAll('.bn-btn').forEach(b=>b.classList.remove('active'));
+        btn.classList.add('active');
+        const t = btn.dataset.tab;
+        tabs.map.style.display     = t==='map' ? 'block':'none';
+        tabs.list.style.display    = t==='list'? 'block':'none';
+        tabs.rewards.style.display = t==='rewards'? 'block':'none';
+      };
+    });
+
+    // ===== MAPA =====
+    const map = L.map('map',{ zoomControl:false }).setView([46.05108,14.50513],14);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19}).addTo(map);
+    L.control.zoom({position:'topright'}).addTo(map);
+
+    let myMarker=null,myPos=null;
+    const markers=new Map();
+
+    function drawCircle(d){
+      const r=+d.radius_m||0;if(r<=0)return null;
+      const opts={radius:r,color:'#7cbc8c',fillOpacity:.16,weight:1};
+      return L.circle([d.lat,d.lng],opts).addTo(map);
+    }
+    function addDrop(d){
+      if(d.lat==null||d.lng==null) return;
+      const html = `
+        <b>${d.title}</b><br>
+        <span style="font-size:11px">radij ${d.radius_m} m • prevzemi: ${d.claimed_count||0}</span>
+        <div style="margin-top:6px;display:flex;gap:6px">
+          <button onclick="window._goTo(${d.lat},${d.lng})">Centriraj</button>
+          <button onclick="window._tryClaim('${d.id}')">Prevzemi</button>
+        </div>`;
+      const m=L.marker([d.lat,d.lng]).addTo(map).bindPopup(html);
+      const c=drawCircle(d);
+      markers.set(d.id,[m,c,d]);
+    }
+    function clearAll(){
+      markers.forEach(([m,c])=>{ if(m)map.removeLayer(m); if(c)map.removeLayer(c); });
+      markers.clear();
+    }
+    window._goTo=(lat,lng)=>{ map.setView([lat,lng],16); };
+
+    function toRad(x){return x*Math.PI/180;}
+    function distanceMeters(a,b){
+      const R=6371000,dLat=toRad(b.lat-a.lat),dLon=toRad(b.lng-a.lng);
+      const la1=toRad(a.lat),la2=toRad(b.lat);
+      const x=Math.sin(dLat/2)**2+Math.cos(la1)*Math.cos(la2)*Math.sin(dLon/2)**2;
+      return 2*R*Math.asin(Math.sqrt(x));
+    }
+    function nearestDrop(){
+      if(!myPos)return null;
+      let best=null,dist=Infinity;
+      markers.forEach(([m,c,d])=>{
+        const dx=distanceMeters(myPos,{lat:d.lat,lng:d.lng});
+        if(dx<dist){dist=dx;best={drop:d,dist};}
+      });
+      return best;
+    }
+    function nearestInside(){
+      const n=nearestDrop(); if(!n)return null;
+      return (n.drop.radius_m!=null && n.dist<=n.drop.radius_m)?n:null;
+    }
+    function uiNearest(){
+      const nAll=nearestDrop(),nIn=nearestInside();
+      const near       = document.getElementById('near');
+      const btn        = document.getElementById('btnClaim');
+      const badge      = document.getElementById('distanceBadge');
+      const hint       = document.getElementById('claimHint');
+
+      if(nAll){
+        near.textContent = nAll.drop.title+' ('+(nAll.dist|0)+' m)';
+        badge.style.display='inline-flex';
+        const left=Math.max(0,(nAll.dist|0)-(nAll.drop.radius_m||0));
+        badge.textContent = left<=0 ? 'v dosegu' : ('+'+left+' m');
+      }else{
+        near.textContent='—';
+        badge.style.display='none';
+      }
+
+      if(nIn){
+        btn.disabled=false;
+        btn.dataset.drop=nIn.drop.id;
+        hint.textContent='Si v dosegu – prevzem je na voljo.';
+      }else{
+        btn.disabled=true;
+        btn.removeAttribute('data-drop');
+        hint.textContent='Premakni se bližje dropu za prevzem.';
+      }
+    }
+    document.getElementById('btnClaim').onclick=()=>{
+      const id=document.getElementById('btnClaim').dataset.drop;
+      if(id) window._tryClaim(id);
+    };
+
+    async function naloziDropse(){
+      const list = await (await fetch(API+'/api/drops?status=active')).json();
+      clearAll(); list.forEach(addDrop);
+
+      const box=document.getElementById('list'); box.innerHTML='';
+      if(!Array.isArray(list) || list.length===0){
+        box.innerHTML='<div class="card muted">Trenutno ni aktivnih dropov.</div>';
+      }else{
+        list.forEach(d=>{
+          const div=document.createElement('div');div.className='card';
+          div.innerHTML=`<b>${d.title}</b> <span class="badge">r=${d.radius_m}m</span>
+            <div class="muted" style="margin-top:4px">prevzemi: ${d.claimed_count||0}</div>
+            <div style="margin-top:8px;display:flex;gap:8px">
+              <button class="btn-ghost go">Centriraj</button>
+              <button class="btn-primary claim" style="padding:8px 16px">Prevzemi</button>
+            </div>`;
+          div.querySelector('.go').onclick = ()=>{ map.setView([d.lat,d.lng],16); document.querySelector('.bn-btn[data-tab="map"]').click(); };
+          div.querySelector('.claim').onclick = ()=>window._tryClaim(d.id);
+          box.appendChild(div);
+        });
+      }
+      uiNearest();
+    }
+
+    async function naloziNagrade(){
+      const box=document.getElementById('rewards'); box.innerHTML='';
+      if(!currentUser){
+        box.innerHTML='<div class="card muted">Najprej se prijavi.</div>';return;
+      }
+      const list = await (await fetch(API+'/api/claims?user_id='+encodeURIComponent(currentUser.id))).json();
+      if(!Array.isArray(list) || list.length===0){
+        box.innerHTML='<div class="card muted">Še nimaš prevzemov.</div>';return;
+      }
+      list.forEach(c=>{
+        const d=c.drop||{};
+        const div=document.createElement('div');div.className='card';
+        div.innerHTML=`<b>${d.title||'Drop'}</b>
+          <div class="muted" style="margin-top:4px">${new Date(c.claimed_at).toLocaleString()}</div>`;
+        box.appendChild(div);
+      });
+    }
+
+    window._tryClaim = async (id)=>{
+      if(!currentUser){alert('Najprej se prijavi.');return;}
+      if(!myPos){alert('Najprej določi svojo lokacijo.');return;}
+      const ent=markers.get(id); if(!ent){alert('Drop ni najden.');return;}
+      const d=ent[2], dist=distanceMeters(myPos,{lat:d.lat,lng:d.lng});
+      if(d.radius_m!=null && dist>d.radius_m){
+        alert('Predaleč: '+(dist|0)+' m (potreben ≤ '+d.radius_m+' m)');
+        return;
+      }
+      const r=await fetch(API+'/api/claims',{
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({
+          drop_id:id,
+          user_id:currentUser.id,
+          user_name:currentUser.username,
+          lat:myPos.lat,
+          lng:myPos.lng,
+          value:1
+        })
+      });
+      const data=await r.json();
+      if(data.ok){
+        alert('Prevzeto!');
+        naloziDropse(); naloziNagrade();
+      }else{
+        if((data.error||'').startsWith('PREDALEC')){
+          const left=data.error.split(':')[1]||'?';
+          alert('Še približaj se: '+left+' m');
+        }else if(data.error==='ZE_CLAIMANO'){
+          alert('Ta drop si že prevzel.');
+        }else{
+          alert('Napaka pri prevzemu: '+data.error);
+        }
+      }
+    };
+
+    function centerMe(){
+      if(!('geolocation' in navigator)){alert('Geolokacija ni na voljo.');return;}
+      navigator.geolocation.getCurrentPosition(
+        p=>{
+          myPos={lat:p.coords.latitude,lng:p.coords.longitude};
+          if(!myMarker){
+            myMarker=L.marker([myPos.lat,myPos.lng],{opacity:.9}).addTo(map).bindPopup('Ti');
+          }
+          myMarker.setLatLng(myPos);
+          map.setView([myPos.lat,myPos.lng],16);
+          uiNearest();
+        },
+        err=>alert('Napaka lokacije: '+err.message),
+        {enableHighAccuracy:true,timeout:10000,maximumAge:8000}
+      );
+    }
+
+    // dodamo gumba v header (Lokacija / Osveži)
+    const headerRight = document.querySelector('.top-row > div:last-child');
+    const btnLoc=document.createElement('button');
+    btnLoc.textContent='Lokacija';
+    btnLoc.className='btn-ghost';
+    btnLoc.onclick=centerMe;
+
+    const btnRef=document.createElement('button');
+    btnRef.textContent='Osveži';
+    btnRef.className='btn-ghost';
+    btnRef.onclick=()=>{naloziDropse();naloziNagrade();};
+
+    headerRight.appendChild(btnLoc);
+    headerRight.appendChild(btnRef);
+
+    map.on('moveend',uiNearest);
+    setInterval(uiNearest,1500);
+
+    const socket = io(API,{transports:['websocket']});
+    socket.on('connect',()=>{ document.getElementById('status').textContent='Povezano: '+socket.id; });
+    socket.on('drop:created',()=>{naloziDropse();});
+    socket.on('drop:updated',()=>{naloziDropse();});
+    socket.on('drop:deleted',()=>{naloziDropse();});
+    socket.on('claim:created',()=>{naloziDropse();naloziNagrade();});
+
+    function initAfterLogin(){
+      userBadge.textContent='Uporabnik: '+(currentUser?.username || '—');
+      naloziDropse();
+      naloziNagrade();
+      setTimeout(centerMe,400);
+    }
+    if(currentUser){ initAfterLogin(); }
+  </script>
+</body>
+</html>
