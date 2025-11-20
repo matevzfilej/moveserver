@@ -49,7 +49,7 @@
       overflow:hidden;
     }
 
-    /* manjši ekrani (mobilni) – naj se raztegne, brez cut-off spodaj */
+    /* manjši ekrani (mobilni) */
     @media (max-width:600px){
       body{
         align-items:stretch;
@@ -60,7 +60,18 @@
         min-height:100vh;
         border-radius:0;
         box-shadow:none;
-        overflow:auto; /* omogoči scroll, če je vsebina višja */
+        overflow:hidden;
+        padding-bottom:64px; /* prostor za nav */
+      }
+      nav.bottomnav{
+        position:fixed;
+        left:0;
+        right:0;
+        bottom:0;
+        height:64px;
+      }
+      #panel{
+        bottom:86px; /* nad fixed nav */
       }
     }
 
@@ -358,7 +369,8 @@
   <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script>
-    const API = 'https://moveserver.realdrophunt.com';
+    // API = isti origin kot index.html (Render, lokalno, karkoli)
+    const API = window.location.origin;
 
     // ===== AUTH =====
     const authOverlay = document.getElementById('authOverlay');
@@ -659,6 +671,30 @@
       }
     };
 
+    // DEMO: če ni nobenega dropa, ustvari enega na tvoji lokaciji
+    async function ensureDemoDropNearMe(){
+      try{
+        const list = await (await fetch(API+'/api/drops?status=active')).json();
+        if(Array.isArray(list) && list.length===0 && myPos){
+          await fetch(API+'/api/drops',{
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({
+              title:'Demo drop',
+              kind:'geo',
+              lat:myPos.lat,
+              lng:myPos.lng,
+              radius_m:40,
+              created_by: currentUser ? currentUser.username : 'demo'
+            })
+          });
+          await naloziDropse();
+        }
+      }catch(e){
+        console.error('ensureDemoDropNearMe',e);
+      }
+    }
+
     function centerMe(){
       if(!('geolocation' in navigator)){alert('Geolokacija ni na voljo.');return;}
       navigator.geolocation.getCurrentPosition(
@@ -670,6 +706,7 @@
           myMarker.setLatLng(myPos);
           map.setView([myPos.lat,myPos.lng],16);
           uiNearest();
+          ensureDemoDropNearMe(); // ustvari demo drop, če ga še ni
         },
         err=>alert('Napaka lokacije: '+err.message),
         {enableHighAccuracy:true,timeout:10000,maximumAge:8000}
@@ -696,6 +733,10 @@
 
     const socket = io(API,{transports:['websocket']});
     socket.on('connect',()=>{ document.getElementById('status').textContent='Povezano: '+socket.id; });
+    socket.on('connect_error',(err)=>{ 
+      console.error(err);
+      document.getElementById('status').textContent='Ni povezave';
+    });
     socket.on('drop:created',()=>{naloziDropse();});
     socket.on('drop:updated',()=>{naloziDropse();});
     socket.on('drop:deleted',()=>{naloziDropse();});
