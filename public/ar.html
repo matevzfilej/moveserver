@@ -5,9 +5,6 @@
   <title>RealDropHunt Move ▸ AR prevzem</title>
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 
-  <!-- A-Frame (WebXR) -->
-  <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
-
   <style>
     html,body{
       margin:0;
@@ -19,11 +16,23 @@
       color:#fff;
     }
 
-    a-scene{
+    /* Kamera čez cel ekran */
+    #cameraWrap{
+      position:fixed;
+      inset:0;
+      background:#000;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+    }
+    #camVideo{
       width:100%;
       height:100%;
+      object-fit:cover;
+      transform:scaleX(-1); /* rahlo bolj “selfie” feeling – odstrani, če ti ni všeč */
     }
 
+    /* Top bar (user, drop, zapri) */
     #uiTop{
       position:fixed;
       top:0;
@@ -58,6 +67,58 @@
       cursor:pointer;
     }
 
+    /* Pin na sredini (malo nižje) */
+    #pinWrap{
+      position:fixed;
+      left:50%;
+      top:55%;
+      transform:translate(-50%,-50%);
+      z-index:5;
+      display:flex;
+      flex-direction:column;
+      align-items:center;
+      gap:6px;
+    }
+
+    #pinBtn{
+      width:80px;
+      height:80px;
+      border-radius:50%;
+      border:none;
+      cursor:pointer;
+      background:radial-gradient(circle at 30% 20%, #ffe7e7 0, #ff8e8e 30%, #e03131 70%, #900000 100%);
+      box-shadow:0 8px 25px rgba(0,0,0,.6);
+      position:relative;
+      animation:float 1.3s ease-in-out infinite alternate;
+    }
+    #pinBtn::after{
+      content:'';
+      position:absolute;
+      left:50%;
+      bottom:-12px;
+      transform:translateX(-50%);
+      width:40px;
+      height:16px;
+      border-radius:50%;
+      background:radial-gradient(circle, rgba(0,0,0,.3), transparent 70%);
+      filter:blur(3px);
+    }
+
+    #pinLabel{
+      font-size:13px;
+      padding:4px 10px;
+      border-radius:999px;
+      background:rgba(0,0,0,.6);
+      border:1px solid rgba(255,255,255,.3);
+      text-shadow:0 1px 2px rgba(0,0,0,.9);
+    }
+
+    @keyframes float{
+      from{transform:translate(-50%,-52%);}
+      to  {transform:translate(-50%,-58%);}
+    }
+
+    /* Toast */
     #toast{
       position:fixed;
       left:50%;
@@ -78,59 +139,30 @@
 </head>
 <body>
 
+<div id="cameraWrap">
+  <video id="camVideo" autoplay playsinline muted></video>
+</div>
+
 <div id="uiTop">
   <div id="leftInfo">
     <div id="userLine">Uporabnik: —</div>
     <div id="dropLine">Drop: —</div>
-    <div id="statusMsg">Poišči 3D pin v prostoru in tapni nanj za prevzem.</div>
+    <div id="statusMsg">Poravnaj se z dropom in tapni pin za prevzem.</div>
   </div>
   <button id="btnClose">✕ Zapri</button>
 </div>
 
+<div id="pinWrap">
+  <button id="pinBtn" aria-label="Prevzemi drop"></button>
+  <div id="pinLabel">Tapni za prevzem</div>
+</div>
+
 <div id="toast"></div>
-
-<a-scene
-  vr-mode-ui="enabled: false"
-  renderer="colorManagement: true; physicallyCorrectLights: true; alpha: true;"
-  embedded
-  webxr="mode: ar; overlayElement: #uiTop;"
-  device-orientation-permission-ui="enabled: true"
-  background="color: #000">
-
-  <a-assets>
-    <!-- 3D model pina – datoteka /public/models/neon-pin.glb -->
-    <a-asset-item id="pinModel" src="/models/neon-pin.glb"></a-asset-item>
-  </a-assets>
-
-  <!-- kamera z mouse/touch cursorjem -->
-  <a-entity id="cameraRig">
-    <a-camera
-      position="0 1.6 0"
-      look-controls="enabled: true"
-      cursor="rayOrigin: mouse"
-      raycaster="objects: .clickable">
-    </a-camera>
-  </a-entity>
-
-  <!-- luči -->
-  <a-entity light="type: ambient; intensity: 0.6"></a-entity>
-  <a-entity light="type: directional; intensity: 0.9" position="0 1 1"></a-entity>
-
-  <!-- 3D PIN: 2 m pred uporabnikom, lebdi gor/dol; ostane na mestu, ko se vrtiš -->
-  <a-entity id="dropPin"
-    class="clickable"
-    gltf-model="#pinModel"
-    position="0 -0.5 -2"
-    scale="0.4 0.4 0.4"
-    animation__float="property: position; dir: alternate; dur: 1400; easing: easeInOutSine;
-                      from: 0 -0.55 -2; to: 0 -0.25 -2; loop: true">
-  </a-entity>
-
-</a-scene>
 
 <script>
   const API = 'https://moveserver.realdrophunt.com';
 
+  // ==== helperji ====
   function getParams(){
     const u = new URL(window.location.href);
     return {
@@ -147,17 +179,36 @@
     setTimeout(()=>t.classList.remove('show'), ms);
   }
 
+  async function startCamera(){
+    const video = document.getElementById('camVideo');
+    try{
+      if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
+        showToast('Kamera ni podprta v tem brskalniku.');
+        return;
+      }
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video:{ facingMode:'environment' },
+        audio:false
+      });
+      video.srcObject = stream;
+    }catch(e){
+      console.error('camera error', e);
+      showToast('Ni mogoče vklopiti kamere.');
+    }
+  }
+
+  // ==== init UI + claim ====
   const {dropId,userId,userName} = getParams();
   const userLine  = document.getElementById('userLine');
   const dropLine  = document.getElementById('dropLine');
   const statusMsg = document.getElementById('statusMsg');
   const btnClose  = document.getElementById('btnClose');
-  const pin       = document.getElementById('dropPin');
+  const pinBtn    = document.getElementById('pinBtn');
 
   userLine.textContent = userName ? `Uporabnik: ${userName}` : 'Uporabnik: —';
   dropLine.textContent = dropId   ? `Drop ID: ${dropId}`     : 'Drop: —';
 
-  // Zapri → nazaj na MoveApp (brez ponovne prijave)
+  // Zapri → nazaj na MoveApp
   btnClose.addEventListener('click', () => {
     if (window.history.length > 1){
       window.history.back();
@@ -215,8 +266,10 @@
     }
   }
 
-  // Klik/tap na 3D pin → claim
-  pin.addEventListener('click', claimDrop);
+  pinBtn.addEventListener('click', claimDrop);
+
+  // start
+  startCamera();
 </script>
 </body>
 </html>
