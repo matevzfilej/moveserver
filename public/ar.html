@@ -1,342 +1,225 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="sl">
-  <head>
-    <meta charset="UTF-8" />
-    <title>RealDropHunt Move – AR prevzem</title>
-    <meta
-      name="viewport"
-      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
-    />
+<head>
+  <meta charset="utf-8">
+  <title>RealDropHunt Move ▸ AR prevzem</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 
-    <style>
-      html,
-      body {
-        margin: 0;
-        padding: 0;
-        height: 100%;
-        overflow: hidden;
-        background: #000;
-        font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
-          sans-serif;
-        color: #f5f7ff;
-      }
+  <!-- A-Frame (WebXR AR) -->
+  <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
 
-      .wrapper {
-        position: fixed;
-        inset: 0;
-        background: #000;
-        display: flex;
-        align-items: stretch;
-        justify-content: center;
-      }
+  <style>
+    html,body{
+      margin:0;
+      padding:0;
+      height:100%;
+      overflow:hidden;
+      font-family:system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background:#000;
+      color:#fff;
+    }
 
-      /* kamera v ozadju */
-      #camera {
-        width: 100%;
-        height: 100%;
-        object-fit: cover;
-      }
+    /* UI čez AR sliko */
+    #ui{
+      position:fixed;
+      top:0;
+      left:0;
+      right:0;
+      padding:10px 12px;
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      z-index:10;
+      pointer-events:none;
+    }
+    #leftInfo{
+      display:flex;
+      flex-direction:column;
+      gap:3px;
+      font-size:12px;
+      text-shadow:0 1px 2px rgba(0,0,0,.8);
+    }
+    #statusMsg{
+      font-size:13px;
+      font-weight:500;
+    }
+    #btnClose{
+      pointer-events:auto;
+      border-radius:999px;
+      border:1px solid rgba(255,255,255,.6);
+      background:rgba(0,0,0,.6);
+      color:#fff;
+      padding:6px 12px;
+      font-size:13px;
+      cursor:pointer;
+    }
 
-      /* overlay nad kamero */
-      .overlay {
-        position: absolute;
-        inset: 0;
-        pointer-events: none; /* default, samo gumbi imajo auto */
-      }
+    #toast{
+      position:fixed;
+      left:50%;
+      bottom:18px;
+      transform:translateX(-50%);
+      padding:8px 14px;
+      border-radius:999px;
+      background:rgba(0,0,0,.75);
+      color:#fff;
+      font-size:13px;
+      opacity:0;
+      pointer-events:none;
+      transition:opacity .2s ease-out;
+      z-index:10;
+    }
+    #toast.show{opacity:1;}
 
-      .topbar {
-        position: absolute;
-        top: 8px;
-        left: 0;
-        right: 0;
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        padding: 8px 12px;
-        pointer-events: none;
-      }
+    a-scene{
+      width:100%;
+      height:100%;
+    }
+  </style>
+</head>
+<body>
 
-      .btn {
-        pointer-events: auto;
-        border: none;
-        border-radius: 999px;
-        padding: 6px 12px;
-        font-size: 13px;
-        background: rgba(10, 10, 10, 0.8);
-        color: #f5f7ff;
-        backdrop-filter: blur(10px);
-        cursor: pointer;
-      }
+<div id="ui">
+  <div id="leftInfo">
+    <div id="userLine">Uporabnik: —</div>
+    <div id="dropLine">Drop: —</div>
+    <div id="statusMsg">Poravnaj pin v sredini in tapni nanj za prevzem.</div>
+  </div>
+  <button id="btnClose">✕ Zapri</button>
+</div>
 
-      .title {
-        font-size: 14px;
-        opacity: 0.85;
-      }
+<div id="toast"></div>
 
-      /* PIN na sredini */
-      .pin-wrapper {
-        position: absolute;
-        left: 50%;
-        top: 50%;
-        transform: translate(-50%, -55%);
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        gap: 10px;
-        pointer-events: none;
-      }
+<a-scene
+  vr-mode-ui="enabled: false"
+  renderer="colorManagement: true; physicallyCorrectLights: true; alpha: true;"
+  embedded
+  xr-mode-ui="enabled: true"
+  background="color: #000">
 
-      .pin {
-        width: 110px;
-        height: 110px;
-        border-radius: 50%;
-        background: radial-gradient(circle at 30% 20%, #ffffff, #00ffe6 35%, #0c2830 65%);
-        box-shadow: 0 0 30px rgba(0, 255, 214, 0.9);
-        position: relative;
-        pointer-events: auto;
-        cursor: pointer;
-      }
+  <a-assets>
+    <!-- 3D model pina – neon-pin.glb naj bo v isti mapi kot ta datoteka -->
+    <a-asset-item id="pinModel" src="neon-pin.glb"></a-asset-item>
+  </a-assets>
 
-      .pin::after {
-        content: "";
-        position: absolute;
-        left: 50%;
-        top: 18%;
-        transform: translateX(-50%);
-        width: 18px;
-        height: 48px;
-        border-radius: 999px;
-        background: linear-gradient(180deg, #ffffff, #00ffe6);
-        box-shadow: 0 0 18px rgba(0, 255, 214, 0.9);
-      }
+  <!-- kamera z "miš" kursorjem za klikanje -->
+  <a-entity id="cameraRig">
+    <a-camera
+      position="0 1.6 0"
+      look-controls="enabled: true"
+      cursor="rayOrigin: mouse"
+      raycaster="objects: .clickable">
+    </a-camera>
+  </a-entity>
 
-      .pin-ring {
-        position: absolute;
-        bottom: -14px;
-        left: 50%;
-        transform: translateX(-50%);
-        width: 60px;
-        height: 18px;
-        border-radius: 50%;
-        background: radial-gradient(
-          ellipse at center,
-          rgba(0, 255, 190, 0.7),
-          rgba(0, 0, 0, 0)
-        );
-        animation: pulse 1.8s infinite ease-out;
-      }
+  <!-- luči za pin -->
+  <a-entity light="type: ambient; intensity: 0.6"></a-entity>
+  <a-entity light="type: directional; intensity: 0.9" position="0 1 1"></a-entity>
 
-      @keyframes pulse {
-        0% {
-          transform: translateX(-50%) scale(1);
-          opacity: 0.85;
-        }
-        100% {
-          transform: translateX(-50%) scale(1.6);
-          opacity: 0;
-        }
-      }
+  <!-- 3D PIN kot drop – 2 m pred kamero, malo nižje -->
+  <a-entity id="dropPin"
+    class="clickable"
+    gltf-model="#pinModel"
+    position="0 -0.5 -2"
+    scale="0.4 0.4 0.4"
+    animation__float="property: position; dir: alternate; dur: 1400; easing: easeInOutSine;
+                      from: 0 -0.55 -2; to: 0 -0.25 -2; loop: true">
+  </a-entity>
 
-      .pin-label {
-        font-size: 13px;
-        background: rgba(0, 0, 0, 0.55);
-        padding: 4px 10px;
-        border-radius: 999px;
-        backdrop-filter: blur(10px);
-      }
+</a-scene>
 
-      /* spodnji tekst + gumb */
-      .bottom {
-        position: absolute;
-        left: 0;
-        right: 0;
-        bottom: 10px;
-        text-align: center;
-        pointer-events: none;
-      }
+<script>
+  const API = 'https://moveserver.realdrophunt.com';
 
-      .bottom-inner {
-        display: inline-flex;
-        flex-direction: column;
-        gap: 6px;
-        align-items: center;
-        pointer-events: auto;
-      }
+  // ===== helperji =====
+  function getParams(){
+    const u = new URL(window.location.href);
+    return {
+      dropId:  u.searchParams.get('dropId')  || '',
+      userId:  u.searchParams.get('userId')  || '',
+      userName:u.searchParams.get('userName')|| ''
+    };
+  }
 
-      .claim-btn {
-        border-radius: 999px;
-        border: none;
-        padding: 10px 24px;
-        background: #26c478;
-        color: #f5fff8;
-        font-size: 15px;
-        font-weight: 600;
-        box-shadow: 0 8px 22px rgba(0, 0, 0, 0.45);
-        cursor: pointer;
-      }
+  function showToast(msg, ms=1600){
+    const t = document.getElementById('toast');
+    t.textContent = msg;
+    t.classList.add('show');
+    setTimeout(()=>t.classList.remove('show'), ms);
+  }
 
-      .hint {
-        font-size: 13px;
-        text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
-      }
+  // ===== main =====
+  const {dropId,userId,userName} = getParams();
 
-      .toast {
-        position: absolute;
-        left: 50%;
-        bottom: 80px;
-        transform: translateX(-50%);
-        background: rgba(10, 10, 10, 0.8);
-        color: #f5f7ff;
-        padding: 8px 12px;
-        border-radius: 999px;
-        font-size: 13px;
-        opacity: 0;
-        transition: opacity 0.25s ease-out;
-        pointer-events: none;
-      }
+  const userLine  = document.getElementById('userLine');
+  const dropLine  = document.getElementById('dropLine');
+  const statusMsg = document.getElementById('statusMsg');
+  const btnClose  = document.getElementById('btnClose');
+  const pin       = document.getElementById('dropPin');
 
-      .toast.show {
-        opacity: 1;
-      }
-    </style>
-  </head>
-  <body>
-    <div class="wrapper">
-      <video id="camera" autoplay playsinline muted></video>
+  userLine.textContent = userName ? `Uporabnik: ${userName}` : 'Uporabnik: —';
+  dropLine.textContent = dropId   ? `Drop ID: ${dropId}`     : 'Drop: —';
 
-      <div class="overlay">
-        <div class="topbar">
-          <button class="btn" onclick="window.location.href='/'">✕ Zapri</button>
-          <span class="title" id="titleLabel">Move • AR prevzem</span>
-        </div>
+  // Zapri → vrni se v MoveApp (brez ponovne prijave)
+  btnClose.addEventListener('click', () => {
+    if (window.history.length > 1){
+      window.history.back();       // nazaj v isti tab / stanje
+    } else {
+      window.location.href = 'https://moveapp.realdrophunt.com';
+    }
+  });
 
-        <div class="pin-wrapper">
-          <div class="pin" id="pin">
-            <div class="pin-ring"></div>
-          </div>
-          <div class="pin-label" id="pinLabel">Tapni za prevzem</div>
-        </div>
+  async function claimDrop(){
+    if (!dropId || !userId){
+      showToast('Manjkajo podatki za prevzem.');
+      return;
+    }
+    statusMsg.textContent = 'Pošiljam zahtevek za prevzem...';
 
-        <div class="bottom">
-          <div class="bottom-inner">
-            <div class="hint" id="hint">
-              Tapni na neon PIN ali gumb spodaj za prevzem nagrade.
-            </div>
-            <button class="claim-btn" id="btnClaim">Prevzemi</button>
-          </div>
-        </div>
-
-        <div class="toast" id="toast"></div>
-      </div>
-    </div>
-
-    <script>
-      // ===== query parametri =====
-      function getParam(name) {
-        try {
-          const url = new URL(window.location.href);
-          return url.searchParams.get(name);
-        } catch {
-          return null;
-        }
-      }
-
-      const dropId = getParam("dropId") || "DEMO-DROP";
-      const userId = getParam("userId") || "DEMO-USER";
-      const userName = getParam("userName") || null;
-
-      const API = window.location.origin;
-
-      const titleLabel = document.getElementById("titleLabel");
-      const hintEl = document.getElementById("hint");
-      const toastEl = document.getElementById("toast");
-      const pin = document.getElementById("pin");
-      const btnClaim = document.getElementById("btnClaim");
-
-      if (dropId && dropId !== "DEMO-DROP") {
-        titleLabel.textContent = "AR prevzem • " + dropId;
-      }
-
-      function showToast(msg) {
-        toastEl.textContent = msg;
-        toastEl.classList.add("show");
-        setTimeout(() => toastEl.classList.remove("show"), 1800);
-      }
-
-      async function startCamera() {
-        const video = document.getElementById("camera");
-        try {
-          const stream = await navigator.mediaDevices.getUserMedia({
-            video: { facingMode: { ideal: "environment" } },
-            audio: false
-          });
-          video.srcObject = stream;
-        } catch (e) {
-          console.error("kamera", e);
-          showToast("Kamera ni na voljo");
-        }
-      }
-
-      async function doClaim() {
-        if (doClaim._busy) return;
-        doClaim._busy = true;
-
-        pin.style.transform = "scale(1.1)";
-        setTimeout(() => {
-          pin.style.transform = "scale(1)";
-        }, 220);
-
-        showToast("Pošiljam prevzem ...");
-        hintEl.textContent = "Pošiljam prevzem na strežnik ...";
-
-        try {
-          const res = await fetch(API + "/api/claims", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              drop_id: dropId,
-              user_id: userId,
-              user_name: userName,
-              lat: null,
-              lng: null,
-              value: 1
-            })
-          });
-
-          const data = await res.json();
-
-          if (data.ok) {
-            showToast("✅ Nagrada uspešno prevzeta");
-            hintEl.textContent =
-              "Prevzem je uspel. Zapiram AR pogled ...";
-            setTimeout(() => {
-              window.location.href = "/";
-            }, 1200);
-          } else {
-            showToast("Napaka: " + (data.error || "neznana napaka"));
-            hintEl.textContent =
-              "Prevzem ni uspel: " + (data.error || "neznana napaka");
-            doClaim._busy = false;
-          }
-        } catch (e) {
-          console.error(e);
-          showToast("Napaka pri povezavi");
-          hintEl.textContent = "Napaka pri povezavi s strežnikom.";
-          doClaim._busy = false;
-        }
-      }
-
-      // eventi
-      pin.addEventListener("click", (e) => {
-        e.stopPropagation();
-        doClaim();
+    try{
+      const res = await fetch(API + '/api/claims',{
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({
+          drop_id: dropId,
+          user_id: userId,
+          user_name: userName || null,
+          value: 1
+        })
       });
-      btnClaim.addEventListener("click", (e) => {
-        e.stopPropagation();
-        doClaim();
-      });
+      const data = await res.json();
+      if (!data.ok){
+        if ((data.error || '').startsWith('PREDALEC')){
+          showToast('Predaleč od dropa.');
+          statusMsg.textContent = 'Premakni se bližje dropu.';
+        } else if (data.error === 'ZE_CLAIMANO'){
+          showToast('Ta drop je že prevzet.');
+          statusMsg.textContent = 'Drop je že prevzet.';
+        } else {
+          showToast('Napaka: ' + data.error);
+          statusMsg.textContent = 'Prišlo je do napake.';
+        }
+        return;
+      }
 
-      startCamera();
-    </script>
-  </body>
+      showToast('Drop uspešno prevzet! 🎉');
+      statusMsg.textContent = 'Drop uspešno prevzet. Zapiram...';
+      setTimeout(() => {
+        if (window.history.length > 1){
+          window.history.back();
+        } else {
+          window.location.href = 'https://moveapp.realdrophunt.com';
+        }
+      }, 1200);
+    }catch(e){
+      console.error(e);
+      showToast('Napaka povezave.');
+      statusMsg.textContent = 'Napaka povezave.';
+    }
+  }
+
+  // klik na 3D pin → claim
+  pin.addEventListener('click', claimDrop);
+</script>
+</body>
 </html>
