@@ -74,10 +74,30 @@
         left: 0;
         right: 0;
         text-align: center;
-        padding: 6px 12px;
+        padding: 6px 12px 52px;
         font-size: 13px;
         opacity: 0.9;
         pointer-events: none;
+      }
+
+      .ar-bottom-inner {
+        pointer-events: auto;
+        display: inline-flex;
+        flex-direction: column;
+        gap: 6px;
+        align-items: center;
+      }
+
+      .ar-claim-btn {
+        border-radius: 999px;
+        border: none;
+        padding: 10px 24px;
+        background: #26c478;
+        color: #f5fff8;
+        font-size: 15px;
+        font-weight: 600;
+        box-shadow: 0 8px 22px rgba(0, 0, 0, 0.45);
+        cursor: pointer;
       }
 
       .toast {
@@ -103,14 +123,11 @@
   <body>
     <div class="ar-overlay">
       <div class="ar-topbar">
-        <!-- zapri vedno nazaj na root (index.html) -->
-        <button class="ar-btn" onclick="window.location.href='/'">✕ Zapri</button>
+        <button class="ar-btn" id="btnClose">✕ Zapri</button>
         <span class="ar-title" id="titleLabel">Move • AR prevzem</span>
       </div>
 
-      <!-- AR SCENE
-           MindAR tukaj samo za kamero (imageTargetSrc mora obstajat,
-           ampak markerja ne uporabljamo – pin je vedno pred kamero) -->
+      <!-- AR SCENE -->
       <a-scene
         mindar-image="imageTargetSrc: ./mind/targets.mind; autoStart: true; uiError: no; uiScanning: no; uiLoading: yes;"
         embedded
@@ -118,13 +135,8 @@
         device-orientation-permission-ui="enabled: true"
         renderer="colorManagement: true, physicallyCorrectLights: true"
       >
-        <!-- CAMERA z cursorjem za tap na ekran -->
-        <a-entity camera look-controls="enabled: true">
-          <a-entity
-            cursor="fuse: false; rayOrigin: mouse"
-            raycaster="objects: .clickable"
-          ></a-entity>
-        </a-entity>
+        <!-- CAMERA -->
+        <a-entity camera look-controls="enabled: true"></a-entity>
 
         <!-- ASSETS -->
         <a-assets>
@@ -134,10 +146,9 @@
           ></a-asset-item>
         </a-assets>
 
-        <!-- 3D PIN – vedno ~1m pred kamero -->
+        <!-- 3D PIN – vedno pred kamero -->
         <a-entity
           id="claim-pin"
-          class="clickable"
           gltf-model="#neonPinModel"
           position="0 -0.15 -1"
           rotation="0 0 0"
@@ -147,7 +158,7 @@
         >
         </a-entity>
 
-        <!-- RADAR RING pod pinom -->
+        <!-- RADAR RING -->
         <a-ring
           id="claim-ring"
           position="0 -0.35 -1"
@@ -160,7 +171,7 @@
         >
         </a-ring>
 
-        <!-- malo svetlobe -->
+        <!-- svetloba -->
         <a-entity light="type: ambient; intensity: 0.9; color: #ffffff"></a-entity>
         <a-entity
           light="type: directional; intensity: 0.6"
@@ -168,90 +179,114 @@
         ></a-entity>
       </a-scene>
 
-      <div class="ar-bottom" id="hint">
-        Tapni na neon PIN, da prevzameš nagrado.
+      <div class="ar-bottom">
+        <div class="ar-bottom-inner">
+          <div id="hint">
+            Tapni na neon PIN ali gumb spodaj za prevzem nagrade.
+          </div>
+          <button class="ar-claim-btn" id="btnDoClaim">Prevzemi</button>
+        </div>
       </div>
 
       <div class="toast" id="toast"></div>
     </div>
 
     <script>
-      // ===== helper za query parametre =====
       function getParam(name) {
         const url = new URL(window.location.href);
         return url.searchParams.get(name);
       }
 
-      const dropId = getParam('dropId') || 'DEMO-DROP';
-      const userId = getParam('userId') || 'DEMO-USER';
-      const userName = getParam('userName') || null;
+      const dropId = getParam("dropId") || "DEMO-DROP";
+      const userId = getParam("userId") || "DEMO-USER";
+      const userName = getParam("userName") || null;
 
-      const titleLabel = document.getElementById('titleLabel');
-      if (dropId && dropId !== 'DEMO-DROP') {
-        titleLabel.textContent = 'AR prevzem • ' + dropId;
+      const titleLabel = document.getElementById("titleLabel");
+      if (dropId && dropId !== "DEMO-DROP") {
+        titleLabel.textContent = "AR prevzem • " + dropId;
       }
 
-      const toastEl = document.getElementById('toast');
-      const hintEl = document.getElementById('hint');
+      const toastEl = document.getElementById("toast");
+      const hintEl = document.getElementById("hint");
+      const API = window.location.origin;
 
       function showToast(msg) {
         toastEl.textContent = msg;
-        toastEl.classList.add('show');
-        setTimeout(() => toastEl.classList.remove('show'), 2000);
+        toastEl.classList.add("show");
+        setTimeout(() => toastEl.classList.remove("show"), 2000);
       }
 
-      const API = window.location.origin; // isti strežnik kot index.html
+      async function performClaim() {
+        if (performClaim._busy) return;
+        performClaim._busy = true;
 
-      document.addEventListener('DOMContentLoaded', () => {
-        const pin = document.querySelector('#claim-pin');
-        const ring = document.querySelector('#claim-ring');
+        const pin = document.getElementById("claim-pin");
+        const ring = document.getElementById("claim-ring");
 
-        if (!pin) return;
+        if (pin) pin.emit("claim");
+        if (ring) ring.emit("claim");
 
-        let claimed = false;
+        showToast("Pošiljam prevzem ...");
 
-        pin.addEventListener('click', async () => {
-          if (claimed) return;
-          claimed = true;
+        try {
+          const res = await fetch(API + "/api/claims", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              drop_id: dropId,
+              user_id: userId,
+              user_name: userName,
+              lat: null,
+              lng: null,
+              value: 1
+            })
+          });
 
-          // AR ANIMACIJA
-          pin.emit('claim');
-          if (ring) ring.emit('claim');
+          const data = await res.json();
 
-          showToast('Pošiljam prevzem ...');
-
-          try {
-            const res = await fetch(API + '/api/claims', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                drop_id: dropId,
-                user_id: userId,
-                user_name: userName,
-                // za demo pošljemo brez lat/lng (backend razdalje ne bo preverjal)
-                lat: null,
-                lng: null,
-                value: 1
-              })
-            });
-
-            const data = await res.json();
-
-            if (data.ok) {
-              showToast('✅ Nagrada uspešno prevzeta');
-              hintEl.textContent =
-                'Prevzem je uspel. Lahko zapreš AR pogled z gumbom zgoraj.';
-            } else {
-              showToast('Napaka: ' + (data.error || 'unknown'));
-              hintEl.textContent =
-                'Prevzem ni uspel: ' + (data.error || 'neznana napaka');
-            }
-          } catch (e) {
-            console.error(e);
-            showToast('Napaka pri povezavi');
-            hintEl.textContent = 'Napaka pri povezavi s strežnikom.';
+          if (data.ok) {
+            showToast("✅ Nagrada uspešno prevzeta");
+            hintEl.textContent =
+              "Prevzem je uspel. Zapiram AR pogled ...";
+            setTimeout(() => {
+              window.location.href = "/";
+            }, 1200);
+          } else {
+            showToast("Napaka: " + (data.error || "unknown"));
+            hintEl.textContent =
+              "Prevzem ni uspel: " + (data.error || "neznana napaka");
+            performClaim._busy = false;
           }
+        } catch (e) {
+          console.error(e);
+          showToast("Napaka pri povezavi");
+          hintEl.textContent = "Napaka pri povezavi s strežnikom.";
+          performClaim._busy = false;
+        }
+      }
+
+      document.addEventListener("DOMContentLoaded", () => {
+        const btnClose = document.getElementById("btnClose");
+        const btnDoClaim = document.getElementById("btnDoClaim");
+        const pin = document.getElementById("claim-pin");
+
+        btnClose.addEventListener("click", (e) => {
+          e.stopPropagation();
+          window.location.href = "/";
         });
+
+        btnDoClaim.addEventListener("click", (e) => {
+          e.stopPropagation();
+          performClaim();
+        });
+
+        // poskus za tap na sam PIN (če A-Frame dogodek dela)
+        if (pin) {
+          pin.addEventListener("click", (e) => {
+            e.stopPropagation();
+            performClaim();
+          });
+        }
       });
     </script>
   </body>
