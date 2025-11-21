@@ -48,11 +48,11 @@
         justify-content: space-between;
         align-items: center;
         padding: 8px 12px;
-        pointer-events: none; /* topbar sam ne jemlje klikov */
+        pointer-events: none; /* topbar kot layout, gumbi pa imajo pointer-events:auto */
       }
 
       .ar-btn {
-        pointer-events: auto; /* gumb pa ja */
+        pointer-events: auto;
         border: none;
         border-radius: 999px;
         padding: 6px 12px;
@@ -168,7 +168,7 @@
       </a-scene>
 
       <div class="ar-bottom" id="hint">
-        Tapni na neon PIN, da prevzameš nagrado.
+        Tapni kjerkoli na zaslon, da prevzameš nagrado.
       </div>
 
       <div class="toast" id="toast"></div>
@@ -203,14 +203,14 @@
       // API = isti origin kot ar.html (moveserver.realdrophunt.com)
       const API = window.location.origin;
 
-      // ===== ZAPRI GUMB – pravi overlay, ustavi propagacijo =====
+      // ===== ZAPRI GUMB – overlay, ustavi propagacijo in gre nazaj v MoveApp =====
       btnClose.addEventListener("click", (e) => {
-        e.stopPropagation();
+        e.stopPropagation();   // da globalni click (claim) NE dobi tega klika
         e.preventDefault();
         window.location.href = "https://moveapp.realdrophunt.com";
       });
 
-      // ===== CLAIM FUNKCIJA (samo na klik pina) =====
+      // ===== CLAIM FUNKCIJA – kliče se iz globalnega klika (kjerkoli) =====
       let claimInProgress = false;
 
       async function doClaim() {
@@ -265,16 +265,24 @@
         }
       }
 
-      // ===== VEZAVA: klik na PIN => claim =====
+      // ===== VEZAVA: klik kjerkoli (razen na Zapri) ⇒ claim =====
       window.addEventListener("load", () => {
+        // klik na pin (če ga raycaster zadene)
         const pin = document.querySelector("#claim-pin");
         if (pin) {
           pin.addEventListener("click", (e) => {
-            // klik na pin naj ne gre nikamor drugam
-            e.stopPropagation();
+            e.stopPropagation(); // da ne dvo-triggera
             doClaim();
           });
         }
+
+        // globalni klik – kjerkoli na AR (predstavitveni način)
+        window.addEventListener("click", (e) => {
+          // če klikneš na gumb Zapri, ne claimaj (zapri handler je že zgoraj)
+          if (e.target === btnClose) return;
+          // vsi ostali kliki = claim
+          doClaim();
+        });
       });
     </script>
   </body>
