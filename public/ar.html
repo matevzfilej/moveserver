@@ -103,10 +103,10 @@
   <body>
     <div class="ar-overlay">
       <div class="ar-topbar">
-        <!-- ZAPRI: direktno na MoveApp -->
+        <!-- ZAPRI: direktno nazaj v MoveApp -->
         <button
           class="ar-btn"
-          onclick="window.location.href='https://moveapp.realdrophunt.com'"
+          id="btnClose"
         >
           ✕ Zapri
         </button>
@@ -121,14 +121,15 @@
         embedded
         vr-mode-ui="enabled: false"
         device-orientation-permission-ui="enabled: true"
-        renderer="colorManagement: true; physicallyCorrectLights: true"
+        renderer="colorManagement: true, physicallyCorrectLights: true"
       >
-        <!-- CAMERA z cursorjem za tap na ekran -->
-        <a-entity camera look-controls="enabled: true">
-          <a-entity
-            cursor="fuse: false; rayOrigin: mouse"
-            raycaster="objects: .clickable"
-          ></a-entity>
+        <!-- CAMERA + CURSOR za tap na ekran -->
+        <a-entity
+          camera
+          look-controls="enabled: true"
+          cursor="fuse: false; rayOrigin: mouse"
+          raycaster="objects: .clickable"
+        >
         </a-entity>
 
         <!-- ASSETS -->
@@ -198,6 +199,7 @@
 
       const toastEl = document.getElementById("toast");
       const hintEl = document.getElementById("hint");
+      const btnClose = document.getElementById("btnClose");
 
       function showToast(msg) {
         toastEl.textContent = msg;
@@ -205,61 +207,86 @@
         setTimeout(() => toastEl.classList.remove("show"), 2000);
       }
 
-      // *** KLJUČNO: API je vedno na MoveServerju ***
-      const API = "https://moveserver.realdrophunt.com";
+      // API = isti origin kot ar.html (moveserver.realdrophunt.com)
+      const API = window.location.origin;
 
-      document.addEventListener("DOMContentLoaded", () => {
-        const pin = document.querySelector("#claim-pin");
-        const ring = document.querySelector("#claim-ring");
+      // ===== ZAPRI GUMB =====
+      btnClose.addEventListener("click", () => {
+        // vedno nazaj v moveapp
+        window.location.href = "https://moveapp.realdrophunt.com";
+      });
 
-        if (!pin) return;
+      // ===== CLAIM FUNKCIJA (uporablja se za klik na pin + fallback na tap) =====
+      let claimInProgress = false;
 
-        let claimed = false;
+      async function doClaim() {
+        if (claimInProgress) return;
+        claimInProgress = true;
 
-        pin.addEventListener("click", async () => {
-          if (claimed) return;
-          claimed = true;
-
-          // AR ANIMACIJA
-          pin.emit("claim");
+        // animacija pina (če obstaja)
+        try {
+          const pin = document.querySelector("#claim-pin");
+          const ring = document.querySelector("#claim-ring");
+          if (pin) pin.emit("claim");
           if (ring) ring.emit("claim");
+        } catch (e) {
+          console.warn("Animacija pina ni uspela:", e);
+        }
 
-          showToast("Pošiljam prevzem ...");
-          hintEl.textContent = "Pošiljam prevzem ...";
+        showToast("Pošiljam prevzem ...");
+        hintEl.textContent = "Pošiljam prevzem ...";
 
-          try {
-            const res = await fetch(API + "/api/claims", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                drop_id: dropId,
-                user_id: userId,
-                user_name: userName,
-                lat: null,
-                lng: null,
-                value: 1
-              })
-            });
+        try {
+          const res = await fetch(API + "/api/claims", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              drop_id: dropId,
+              user_id: userId,
+              user_name: userName,
+              lat: null,
+              lng: null,
+              value: 1
+            })
+          });
 
-            const data = await res.json();
-            console.log("AR claim response:", data);
+          const data = await res.json();
+          console.log("AR claim response:", data);
 
-            if (data.ok) {
-              showToast("✅ Nagrada uspešno prevzeta");
-              hintEl.textContent =
-                "Prevzem je uspel. Lahko zapreš AR pogled z gumbom zgoraj.";
-            } else {
-              showToast("Napaka: " + (data.error || "unknown"));
-              hintEl.textContent =
-                "Prevzem ni uspel: " + (data.error || "neznana napaka");
-            }
-          } catch (e) {
-            console.error(e);
-            showToast("Napaka pri povezavi");
-            hintEl.textContent = "Napaka pri povezavi s strežnikom.";
-          } finally {
-            claimed = false; // dovoli ponoven poskus, če ni uspelo
+          if (data.ok) {
+            showToast("✅ Nagrada uspešno prevzeta");
+            hintEl.textContent =
+              "Prevzem je uspel. Lahko zapreš AR pogled z gumbom zgoraj.";
+          } else {
+            showToast("Napaka: " + (data.error || "unknown"));
+            hintEl.textContent =
+              "Prevzem ni uspel: " + (data.error || "neznana napaka");
           }
+        } catch (e) {
+          console.error(e);
+          showToast("Napaka pri povezavi");
+          hintEl.textContent = "Napaka pri povezavi s strežnikom.";
+        } finally {
+          claimInProgress = false;
+        }
+      }
+
+      // ===== VEZAVA NA PIN + FALLBACK NA TAP =====
+      window.addEventListener("load", () => {
+        const pin = document.querySelector("#claim-pin");
+        if (pin) {
+          // 1) tap na pin (če raycaster zadane)
+          pin.addEventListener("click", () => {
+            doClaim();
+          });
+        }
+
+        // 2) fallback: tap kjerkoli po AR (razen na gumb Zapri)
+        window.addEventListener("click", (e) => {
+          // če klikneš na zapri, ne claimaj
+          if (e.target === btnClose || e.target.closest(".ar-topbar")) return;
+          // če je klik že šel na pin, ni važno, doClaim ima guard
+          doClaim();
         });
       });
     </script>
