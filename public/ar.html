@@ -38,18 +38,14 @@
         height: 100%;
       }
 
-      .ar-topbar {
-        position: absolute;
-        top: 8px;
-        left: 0;
-        right: 0;
-        z-index: 10;
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        padding: 8px 12px;
-        pointer-events: none; /* topbar kot layout, gumbi pa imajo pointer-events:auto */
-      }
+<div class="ar-topbar">
+  <button class="ar-btn" id="btnClose"
+          style="z-index:9999; position:relative;">
+    ✕ Zapri
+  </button>
+  <span class="ar-title" id="titleLabel">Move • AR prevzem</span>
+</div>
+
 
       .ar-btn {
         pointer-events: auto;
@@ -204,11 +200,16 @@
       const API = window.location.origin;
 
       // ===== ZAPRI GUMB – overlay, ustavi propagacijo in gre nazaj v MoveApp =====
-      btnClose.addEventListener("click", (e) => {
-        e.stopPropagation();   // da globalni click (claim) NE dobi tega klika
-        e.preventDefault();
-        window.location.href = "https://moveapp.realdrophunt.com";
-      });
+    btnClose.addEventListener("click", (e) => {
+  e.stopPropagation();
+  e.preventDefault();
+
+  // Chrome AR mode včasih blokira location.href → window.open je 100% reliable
+  window.open("https://moveapp.realdrophunt.com", "_self");
+
+  return false;
+});
+
 
       // ===== CLAIM FUNKCIJA – kliče se iz globalnega klika (kjerkoli) =====
       let claimInProgress = false;
