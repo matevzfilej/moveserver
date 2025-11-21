@@ -38,30 +38,23 @@
         height: 100%;
       }
 
-<div class="ar-topbar">
-  <button class="ar-btn" id="btnClose"
-          style="z-index:9999; position:relative;">
-    ✕ Zapri
-  </button>
-  <span class="ar-title" id="titleLabel">Move • AR prevzem</span>
-</div>
-
-
-      .ar-btn {
-        pointer-events: auto;
-        border: none;
-        border-radius: 999px;
-        padding: 6px 12px;
-        font-size: 13px;
-        background: rgba(10, 10, 10, 0.8);
-        color: #f5f7ff;
-        backdrop-filter: blur(10px);
-        cursor: pointer;
+      .ar-topbar {
+        position: absolute;
+        top: 8px;
+        left: 0;
+        right: 0;
+        z-index: 10;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        padding: 8px 12px;
+        pointer-events: none;
       }
 
       .ar-title {
         font-size: 14px;
-        opacity: 0.85;
+        opacity: 0.9;
+        text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
       }
 
       .ar-bottom {
@@ -74,6 +67,7 @@
         font-size: 13px;
         opacity: 0.9;
         pointer-events: none;
+        text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
       }
 
       .toast {
@@ -99,8 +93,6 @@
   <body>
     <div class="ar-overlay">
       <div class="ar-topbar">
-        <!-- ZAPRI: overlay gumb -->
-        <button class="ar-btn" id="btnClose">✕ Zapri</button>
         <span class="ar-title" id="titleLabel">Move • AR prevzem</span>
       </div>
 
@@ -188,7 +180,6 @@
 
       const toastEl = document.getElementById("toast");
       const hintEl = document.getElementById("hint");
-      const btnClose = document.getElementById("btnClose");
 
       function showToast(msg) {
         toastEl.textContent = msg;
@@ -199,19 +190,7 @@
       // API = isti origin kot ar.html (moveserver.realdrophunt.com)
       const API = window.location.origin;
 
-      // ===== ZAPRI GUMB – overlay, ustavi propagacijo in gre nazaj v MoveApp =====
-    btnClose.addEventListener("click", (e) => {
-  e.stopPropagation();
-  e.preventDefault();
-
-  // Chrome AR mode včasih blokira location.href → window.open je 100% reliable
-  window.open("https://moveapp.realdrophunt.com", "_self");
-
-  return false;
-});
-
-
-      // ===== CLAIM FUNKCIJA – kliče se iz globalnega klika (kjerkoli) =====
+      // ===== CLAIM FUNKCIJA – kliče se iz klika kjerkoli =====
       let claimInProgress = false;
 
       async function doClaim() {
@@ -250,8 +229,16 @@
 
           if (data.ok) {
             showToast("✅ Nagrada uspešno prevzeta");
-            hintEl.textContent =
-              "Prevzem je uspel. Lahko zapreš AR pogled z gumbom zgoraj.";
+            hintEl.textContent = "Drop je prevzet, vračam te v aplikacijo ...";
+
+            // 🔙 AUTO BACK po uspešnem claimu
+            setTimeout(() => {
+              if (window.history.length > 1) {
+                window.history.back();
+              } else {
+                window.location.href = "https://moveapp.realdrophunt.com";
+              }
+            }, 1200);
           } else {
             showToast("Napaka: " + (data.error || "unknown"));
             hintEl.textContent =
@@ -266,22 +253,19 @@
         }
       }
 
-      // ===== VEZAVA: klik kjerkoli (razen na Zapri) ⇒ claim =====
+      // ===== VEZAVA: klik kjerkoli (predstavitveni način) =====
       window.addEventListener("load", () => {
         // klik na pin (če ga raycaster zadene)
         const pin = document.querySelector("#claim-pin");
         if (pin) {
           pin.addEventListener("click", (e) => {
-            e.stopPropagation(); // da ne dvo-triggera
+            e.stopPropagation();
             doClaim();
           });
         }
 
-        // globalni klik – kjerkoli na AR (predstavitveni način)
+        // globalni klik – kjerkoli na AR
         window.addEventListener("click", (e) => {
-          // če klikneš na gumb Zapri, ne claimaj (zapri handler je že zgoraj)
-          if (e.target === btnClose) return;
-          // vsi ostali kliki = claim
           doClaim();
         });
       });
