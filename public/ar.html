@@ -103,8 +103,8 @@
   <body>
     <div class="ar-overlay">
       <div class="ar-topbar">
-        <!-- zapri vedno nazaj na root (index.html) -->
-        <button class="ar-btn" onclick="window.location.href='/'">✕ Zapri</button>
+        <!-- ZAPRI: zdaj preko JS (history.back ali moveapp) -->
+        <button class="ar-btn" id="btnClose">✕ Zapri</button>
         <span class="ar-title" id="titleLabel">Move • AR prevzem</span>
       </div>
 
@@ -116,14 +116,15 @@
         embedded
         vr-mode-ui="enabled: false"
         device-orientation-permission-ui="enabled: true"
-        renderer="colorManagement: true, physicallyCorrectLights: true"
+        renderer="colorManagement: true; physicallyCorrectLights: true"
       >
-        <!-- CAMERA z cursorjem za tap na ekran -->
-        <a-entity camera look-controls="enabled: true">
-          <a-entity
-            cursor="fuse: false; rayOrigin: mouse"
-            raycaster="objects: .clickable"
-          ></a-entity>
+        <!-- CAMERA z cursorjem za tap na ekran (POPRAVLJENO: cursor direktno na kameri) -->
+        <a-entity
+          camera
+          look-controls="enabled: true"
+          cursor="fuse: false; rayOrigin: mouse"
+          raycaster="objects: .clickable"
+        >
         </a-entity>
 
         <!-- ASSETS -->
@@ -182,48 +183,61 @@
         return url.searchParams.get(name);
       }
 
-      const dropId = getParam('dropId') || 'DEMO-DROP';
-      const userId = getParam('userId') || 'DEMO-USER';
-      const userName = getParam('userName') || null;
+      const dropId = getParam("dropId") || "DEMO-DROP";
+      const userId = getParam("userId") || "DEMO-USER";
+      const userName = getParam("userName") || null;
 
-      const titleLabel = document.getElementById('titleLabel');
-      if (dropId && dropId !== 'DEMO-DROP') {
-        titleLabel.textContent = 'AR prevzem • ' + dropId;
+      const titleLabel = document.getElementById("titleLabel");
+      if (dropId && dropId !== "DEMO-DROP") {
+        titleLabel.textContent = "AR prevzem • " + dropId;
       }
 
-      const toastEl = document.getElementById('toast');
-      const hintEl = document.getElementById('hint');
+      const toastEl = document.getElementById("toast");
+      const hintEl = document.getElementById("hint");
+      const btnClose = document.getElementById("btnClose");
 
       function showToast(msg) {
         toastEl.textContent = msg;
-        toastEl.classList.add('show');
-        setTimeout(() => toastEl.classList.remove('show'), 2000);
+        toastEl.classList.add("show");
+        setTimeout(() => toastEl.classList.remove("show"), 2000);
       }
 
-      const API = window.location.origin; // isti strežnik kot index.html
+      // API = isti origin kot ar.html (moveserver.realdrophunt.com)
+      const API = window.location.origin;
 
-      document.addEventListener('DOMContentLoaded', () => {
-        const pin = document.querySelector('#claim-pin');
-        const ring = document.querySelector('#claim-ring');
+      // ==== ZAPRI GUMB – NAZAJ NA MOVEAPP ALI HISTORY.BACK ====
+      btnClose.addEventListener("click", () => {
+        if (window.history.length > 1) {
+          window.history.back();
+        } else {
+          // direktno nazaj v app
+          window.location.href = "https://moveapp.realdrophunt.com";
+        }
+      });
+
+      // Uporabimo window.load, da je A-Frame scena sigurno inicializirana
+      window.addEventListener("load", () => {
+        const pin = document.querySelector("#claim-pin");
+        const ring = document.querySelector("#claim-ring");
 
         if (!pin) return;
 
         let claimed = false;
 
-        pin.addEventListener('click', async () => {
+        pin.addEventListener("click", async () => {
           if (claimed) return;
           claimed = true;
 
           // AR ANIMACIJA
-          pin.emit('claim');
-          if (ring) ring.emit('claim');
+          pin.emit("claim");
+          if (ring) ring.emit("claim");
 
-          showToast('Pošiljam prevzem ...');
+          showToast("Pošiljam prevzem ...");
 
           try {
-            const res = await fetch(API + '/api/claims', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
+            const res = await fetch(API + "/api/claims", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
                 drop_id: dropId,
                 user_id: userId,
@@ -238,18 +252,18 @@
             const data = await res.json();
 
             if (data.ok) {
-              showToast('✅ Nagrada uspešno prevzeta');
+              showToast("✅ Nagrada uspešno prevzeta");
               hintEl.textContent =
-                'Prevzem je uspel. Lahko zapreš AR pogled z gumbom zgoraj.';
+                "Prevzem je uspel. Lahko zapreš AR pogled z gumbom zgoraj.";
             } else {
-              showToast('Napaka: ' + (data.error || 'unknown'));
+              showToast("Napaka: " + (data.error || "unknown"));
               hintEl.textContent =
-                'Prevzem ni uspel: ' + (data.error || 'neznana napaka');
+                "Prevzem ni uspel: " + (data.error || "neznana napaka");
             }
           } catch (e) {
             console.error(e);
-            showToast('Napaka pri povezavi');
-            hintEl.textContent = 'Napaka pri povezavi s strežnikom.';
+            showToast("Napaka pri povezavi");
+            hintEl.textContent = "Napaka pri povezavi s strežnikom.";
           }
         });
       });
