@@ -5,7 +5,7 @@
   <title>RealDropHunt Move ▸ AR prevzem</title>
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 
-  <!-- A-Frame (WebXR / AR/VR) -->
+  <!-- A-Frame (3D) -->
   <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
 
   <style>
@@ -19,7 +19,31 @@
       color:#fff;
     }
 
-    /* UI čez AR pogled */
+    /* Kamera v ozadju */
+    #cam{
+      position:fixed;
+      inset:0;
+      width:100%;
+      height:100%;
+      object-fit:cover;
+      z-index:0;
+      background:#000;
+    }
+
+    /* A-Frame scena nad videom */
+    a-scene{
+      position:relative;
+      width:100%;
+      height:100%;
+      z-index:1;
+    }
+
+    /* platno naj bo prosojno, da se vidi kamera */
+    canvas.a-canvas{
+      background-color:transparent !important;
+    }
+
+    /* UI čez 3D pogled */
     #uiTop{
       position:fixed;
       top:0;
@@ -54,7 +78,6 @@
       cursor:pointer;
     }
 
-    /* majhen “badge” pod pinom v AR prostoru (2D UI) */
     #toast{
       position:fixed;
       left:50%;
@@ -87,18 +110,19 @@
 
 <div id="toast"></div>
 
+<!-- Kamera v ozadju -->
+<video id="cam" autoplay playsinline muted></video>
+
 <!-- A-Frame scena -->
 <a-scene
   embedded
-  vr-mode-ui="enabled: true"
-  renderer="colorManagement: true; physicallyCorrectLights: true; antialias: true; alpha: true;"
-  xr-mode-ui="enabled: true"
-  webxr="optionalFeatures: hit-test, local-floor"
+  vr-mode-ui="enabled: false"
+  renderer="alpha: true; colorManagement: true; antialias: true;"
   background="color: #000000">
 
   <!-- assets -->
   <a-assets>
-    <!-- neon pin model – pot: /public/models/neon-pin.glb -->
+    <!-- neon pin model – /models/neon-pin.glb -->
     <a-asset-item id="pinModel" src="models/neon-pin.glb"></a-asset-item>
   </a-assets>
 
@@ -116,9 +140,7 @@
   <a-entity light="type: ambient; intensity: 0.7"></a-entity>
   <a-entity light="type: directional; intensity: 0.9" position="0 2 1"></a-entity>
 
-  <!-- 3D PIN v prostoru
-       - stoji približno 2 m pred tabo in malo nižje
-       - ko se obrneš, lahko ostane za tabo (ni prilepljen na ekran) -->
+  <!-- 3D PIN v prostoru: cca 2 m pred tabo, malo "plava" gor/dol -->
   <a-entity id="dropPin"
     class="clickable"
     gltf-model="#pinModel"
@@ -166,7 +188,7 @@
   userLine.textContent = userName ? `Uporabnik: ${userName}` : 'Uporabnik: —';
   dropLine.textContent = dropId   ? `Drop ID: ${dropId}`     : 'Drop: —';
 
-  // zapiranje – nazaj v moveapp, brez ponovne prijave
+  // zapiranje – nazaj v MoveApp, brez ponovne prijave
   btnClose.addEventListener('click', () => {
     if (window.history.length > 1){
       window.history.back();
@@ -175,7 +197,7 @@
     }
   });
 
-  // ===== CLAIM logika =====
+  // ===== CLAIM logika (ENAKA KOT PREJ) =====
   async function claimDrop(){
     if (!dropId || !userId){
       showToast('Manjkajo podatki za prevzem.');
@@ -229,13 +251,36 @@
     }
   }
 
-  // klik na 3D pin → claim
+  // klik na 3D pin → claim (ENAKO kot prej, samo zdaj nad kamero)
   pinEntity.addEventListener('click', claimDrop);
 
   // malo info na začetku
   setTimeout(() => {
     showToast('Obrni se, da najdeš 3D pin, nato tapni nanj.');
   }, 900);
+
+  // ===== KAMERA V OZADJU =====
+  async function startCamera(){
+    const video = document.getElementById('cam');
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
+      console.warn('getUserMedia ni na voljo');
+      showToast('Kamera ni podprta v brskalniku.');
+      return;
+    }
+    try{
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: 'environment' } },
+        audio: false
+      });
+      video.srcObject = stream;
+    }catch(e){
+      console.error('Napaka kamere:', e);
+      showToast('Kamera ni na voljo (dovoljenja?).');
+    }
+  }
+
+  // zaženemo kamero takoj
+  startCamera();
 </script>
 </body>
 </html>
