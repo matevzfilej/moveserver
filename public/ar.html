@@ -107,15 +107,14 @@
         <button
           class="ar-btn"
           id="btnClose"
+          onclick="window.location.href='https://moveapp.realdrophunt.com'"
         >
           ✕ Zapri
         </button>
         <span class="ar-title" id="titleLabel">Move • AR prevzem</span>
       </div>
 
-      <!-- AR SCENE
-           MindAR tukaj samo za kamero (imageTargetSrc mora obstajat,
-           ampak markerja ne uporabljamo – pin je vedno pred kamero) -->
+      <!-- AR SCENE -->
       <a-scene
         mindar-image="imageTargetSrc: ./mind/targets.mind; autoStart: true; uiError: no; uiScanning: no; uiLoading: yes;"
         embedded
@@ -210,13 +209,7 @@
       // API = isti origin kot ar.html (moveserver.realdrophunt.com)
       const API = window.location.origin;
 
-      // ===== ZAPRI GUMB =====
-      btnClose.addEventListener("click", () => {
-        // vedno nazaj v moveapp
-        window.location.href = "https://moveapp.realdrophunt.com";
-      });
-
-      // ===== CLAIM FUNKCIJA (uporablja se za klik na pin + fallback na tap) =====
+      // ===== CLAIM FUNKCIJA =====
       let claimInProgress = false;
 
       async function doClaim() {
@@ -275,17 +268,21 @@
       window.addEventListener("load", () => {
         const pin = document.querySelector("#claim-pin");
         if (pin) {
-          // 1) tap na pin (če raycaster zadane)
+          // tap na pin
           pin.addEventListener("click", () => {
             doClaim();
           });
         }
 
-        // 2) fallback: tap kjerkoli po AR (razen na gumb Zapri)
+        // fallback: tap kjerkoli po AR (razen na topbar)
         window.addEventListener("click", (e) => {
-          // če klikneš na zapri, ne claimaj
-          if (e.target === btnClose || e.target.closest(".ar-topbar")) return;
-          // če je klik že šel na pin, ni važno, doClaim ima guard
+          // če klikneš na zapri ali na topbar, ne claimaj
+          if (
+            e.target === btnClose ||
+            (e.target.closest && e.target.closest(".ar-topbar"))
+          ) {
+            return;
+          }
           doClaim();
         });
       });
