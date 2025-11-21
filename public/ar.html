@@ -48,11 +48,11 @@
         justify-content: space-between;
         align-items: center;
         padding: 8px 12px;
-        pointer-events: none;
+        pointer-events: none; /* topbar sam ne jemlje klikov */
       }
 
       .ar-btn {
-        pointer-events: auto;
+        pointer-events: auto; /* gumb pa ja */
         border: none;
         border-radius: 999px;
         padding: 6px 12px;
@@ -103,24 +103,18 @@
   <body>
     <div class="ar-overlay">
       <div class="ar-topbar">
-        <!-- ZAPRI: direktno nazaj v MoveApp -->
-        <button
-          class="ar-btn"
-          id="btnClose"
-          onclick="window.location.href='https://moveapp.realdrophunt.com'"
-        >
-          ✕ Zapri
-        </button>
+        <!-- ZAPRI: overlay gumb -->
+        <button class="ar-btn" id="btnClose">✕ Zapri</button>
         <span class="ar-title" id="titleLabel">Move • AR prevzem</span>
       </div>
 
-      <!-- AR SCENE -->
+      <!-- AR SCENE – kamera + pin -->
       <a-scene
         mindar-image="imageTargetSrc: ./mind/targets.mind; autoStart: true; uiError: no; uiScanning: no; uiLoading: yes;"
         embedded
         vr-mode-ui="enabled: false"
         device-orientation-permission-ui="enabled: true"
-        renderer="colorManagement: true, physicallyCorrectLights: true"
+        renderer="colorManagement: true; physicallyCorrectLights: true"
       >
         <!-- CAMERA + CURSOR za tap na ekran -->
         <a-entity
@@ -139,7 +133,7 @@
           ></a-asset-item>
         </a-assets>
 
-        <!-- 3D PIN – vedno ~1m pred kamero -->
+        <!-- 3D PIN – ~1m pred kamero -->
         <a-entity
           id="claim-pin"
           class="clickable"
@@ -209,7 +203,14 @@
       // API = isti origin kot ar.html (moveserver.realdrophunt.com)
       const API = window.location.origin;
 
-      // ===== CLAIM FUNKCIJA =====
+      // ===== ZAPRI GUMB – pravi overlay, ustavi propagacijo =====
+      btnClose.addEventListener("click", (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        window.location.href = "https://moveapp.realdrophunt.com";
+      });
+
+      // ===== CLAIM FUNKCIJA (samo na klik pina) =====
       let claimInProgress = false;
 
       async function doClaim() {
@@ -264,27 +265,16 @@
         }
       }
 
-      // ===== VEZAVA NA PIN + FALLBACK NA TAP =====
+      // ===== VEZAVA: klik na PIN => claim =====
       window.addEventListener("load", () => {
         const pin = document.querySelector("#claim-pin");
         if (pin) {
-          // tap na pin
-          pin.addEventListener("click", () => {
+          pin.addEventListener("click", (e) => {
+            // klik na pin naj ne gre nikamor drugam
+            e.stopPropagation();
             doClaim();
           });
         }
-
-        // fallback: tap kjerkoli po AR (razen na topbar)
-        window.addEventListener("click", (e) => {
-          // če klikneš na zapri ali na topbar, ne claimaj
-          if (
-            e.target === btnClose ||
-            (e.target.closest && e.target.closest(".ar-topbar"))
-          ) {
-            return;
-          }
-          doClaim();
-        });
       });
     </script>
   </body>
