@@ -80,14 +80,6 @@
         pointer-events: none;
       }
 
-      .ar-bottom-inner {
-        display: inline-flex;
-        flex-direction: column;
-        align-items: center;
-        gap: 6px;
-        pointer-events: auto;
-      }
-
       .toast {
         position: absolute;
         left: 50%;
@@ -111,7 +103,7 @@
   <body>
     <div class="ar-overlay">
       <div class="ar-topbar">
-        <!-- ZAPRI: direktno nazaj v MoveApp (brez JS odvisnosti) -->
+        <!-- ZAPRI: direktno na MoveApp -->
         <button
           class="ar-btn"
           onclick="window.location.href='https://moveapp.realdrophunt.com'"
@@ -132,12 +124,11 @@
         renderer="colorManagement: true; physicallyCorrectLights: true"
       >
         <!-- CAMERA z cursorjem za tap na ekran -->
-        <a-entity
-          camera
-          look-controls="enabled: true"
-          cursor="fuse: false; rayOrigin: mouse"
-          raycaster="objects: .clickable"
-        >
+        <a-entity camera look-controls="enabled: true">
+          <a-entity
+            cursor="fuse: false; rayOrigin: mouse"
+            raycaster="objects: .clickable"
+          ></a-entity>
         </a-entity>
 
         <!-- ASSETS -->
@@ -182,17 +173,8 @@
         ></a-entity>
       </a-scene>
 
-      <div class="ar-bottom">
-        <div class="ar-bottom-inner">
-          <span id="hint">Tapni na neon PIN ali pritisni gumb za prevzem.</span>
-          <button
-            class="ar-btn"
-            style="padding: 7px 20px; font-weight: 600;"
-            onclick="window.claimDrop && window.claimDrop()"
-          >
-            Prevzemi
-          </button>
-        </div>
+      <div class="ar-bottom" id="hint">
+        Tapni na neon PIN, da prevzameš nagrado.
       </div>
 
       <div class="toast" id="toast"></div>
@@ -223,72 +205,61 @@
         setTimeout(() => toastEl.classList.remove("show"), 2000);
       }
 
-      // API = isti origin kot ar.html (moveserver.realdrophunt.com)
-      const API = window.location.origin;
+      // *** KLJUČNO: API je vedno na MoveServerju ***
+      const API = "https://moveserver.realdrophunt.com";
 
-      // ===== CLAIM FUNKCIJA – na pin + na gumb "Prevzemi" =====
-      async function claimDrop() {
-        // zaščita, da ne spamamo requestov
-        if (claimDrop._busy) return;
-        claimDrop._busy = true;
-
-        showToast("Pošiljam prevzem ...");
-        hintEl.textContent = "Pošiljam prevzem ...";
-
-        // AR animacija pina, če obstaja
-        try {
-          const pin = document.querySelector("#claim-pin");
-          const ring = document.querySelector("#claim-ring");
-          if (pin) pin.emit("claim");
-          if (ring) ring.emit("claim");
-        } catch (e) {
-          console.warn("Animacija pina ni uspela:", e);
-        }
-
-        try {
-          const res = await fetch(API + "/api/claims", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              drop_id: dropId,
-              user_id: userId,
-              user_name: userName,
-              // za demo pošljemo brez lat/lng (backend razdalje ne bo preverjal)
-              lat: null,
-              lng: null,
-              value: 1
-            })
-          });
-
-          const data = await res.json();
-
-          if (data.ok) {
-            showToast("✅ Nagrada uspešno prevzeta");
-            hintEl.textContent =
-              "Prevzem je uspel. Lahko zapreš AR pogled z gumbom zgoraj.";
-          } else {
-            showToast("Napaka: " + (data.error || "unknown"));
-            hintEl.textContent =
-              "Prevzem ni uspel: " + (data.error || "neznana napaka");
-          }
-        } catch (e) {
-          console.error(e);
-          showToast("Napaka pri povezavi");
-          hintEl.textContent = "Napaka pri povezavi s strežnikom.";
-        } finally {
-          claimDrop._busy = false;
-        }
-      }
-
-      // da lahko gumb v HTML kliče funkcijo
-      window.claimDrop = claimDrop;
-
-      // Ko je scena pripravljena, povežemo tudi klik na 3D PIN
-      window.addEventListener("load", () => {
+      document.addEventListener("DOMContentLoaded", () => {
         const pin = document.querySelector("#claim-pin");
+        const ring = document.querySelector("#claim-ring");
+
         if (!pin) return;
-        pin.addEventListener("click", () => {
-          window.claimDrop && window.claimDrop();
+
+        let claimed = false;
+
+        pin.addEventListener("click", async () => {
+          if (claimed) return;
+          claimed = true;
+
+          // AR ANIMACIJA
+          pin.emit("claim");
+          if (ring) ring.emit("claim");
+
+          showToast("Pošiljam prevzem ...");
+          hintEl.textContent = "Pošiljam prevzem ...";
+
+          try {
+            const res = await fetch(API + "/api/claims", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                drop_id: dropId,
+                user_id: userId,
+                user_name: userName,
+                lat: null,
+                lng: null,
+                value: 1
+              })
+            });
+
+            const data = await res.json();
+            console.log("AR claim response:", data);
+
+            if (data.ok) {
+              showToast("✅ Nagrada uspešno prevzeta");
+              hintEl.textContent =
+                "Prevzem je uspel. Lahko zapreš AR pogled z gumbom zgoraj.";
+            } else {
+              showToast("Napaka: " + (data.error || "unknown"));
+              hintEl.textContent =
+                "Prevzem ni uspel: " + (data.error || "neznana napaka");
+            }
+          } catch (e) {
+            console.error(e);
+            showToast("Napaka pri povezavi");
+            hintEl.textContent = "Napaka pri povezavi s strežnikom.";
+          } finally {
+            claimed = false; // dovoli ponoven poskus, če ni uspelo
+          }
         });
       });
     </script>
