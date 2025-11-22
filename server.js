@@ -530,34 +530,46 @@ app.post(['/api/ar-claim', '/ar-claim'], async (req, res) => {
   }
 });
 
-// GET /api/claims?user_id=...
+// GET /api/claims
+// - brez user_id  -> vsi prevzemi (dashboard)
+// - z user_id     -> samo prevzemi tega uporabnika (app – Nagrade)
 app.get(['/api/claims', '/claims'], async (req, res) => {
   const user_id = req.query.user_id;
-  if (!user_id) {
-    return res.status(400).json({ ok: false, error: 'MANJKA_user_id' });
-  }
 
   if (!useDb || !pool) {
-    const rows = mem.claims
-      .filter(c => String(c.user_id) === String(user_id))
+    let rows = mem.claims
       .map(c => ({
         ...c,
         drop: mem.drops.find(d => d.id === c.drop_id) || null
       }))
       .sort((a, b) => new Date(b.claimed_at) - new Date(a.claimed_at));
+
+    if (user_id) {
+      rows = rows.filter(c => String(c.user_id) === String(user_id));
+    }
     return res.json(rows);
   }
 
   try {
+    const params = [];
+    let where = '';
+    if (user_id) {
+      where = 'WHERE c.user_id = $1';
+      params.push(String(user_id));
+    }
+
     const { rows } = await pool.query(
-      `SELECT c.*, d.title AS drop_title, d.radius_m AS drop_radius_m,
-              d.lat AS drop_lat, d.lng AS drop_lng
+      `SELECT c.*, 
+              d.title AS drop_title,
+              d.radius_m AS drop_radius_m,
+              d.lat AS drop_lat,
+              d.lng AS drop_lng
        FROM claims c
        LEFT JOIN drops d ON d.id = c.drop_id
-       WHERE c.user_id = $1
+       ${where}
        ORDER BY c.claimed_at DESC
-       LIMIT 500`,
-      [String(user_id)]
+       LIMIT 1000`,
+      params
     );
 
     const mapped = rows.map(r => ({
@@ -568,6 +580,7 @@ app.get(['/api/claims', '/claims'], async (req, res) => {
       value: r.value,
       tx_hash: r.tx_hash,
       claimed_at: r.claimed_at,
+      drop_title: r.drop_title,
       drop: {
         id: r.drop_id,
         title: r.drop_title,
